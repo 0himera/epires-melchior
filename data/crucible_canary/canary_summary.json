@@ -1,0 +1,25 @@
+{
+  "benchmark_name": "Melchior Crucible Canary Holdout Benchmark",
+  "created_at": "2026-09-28T21:20:00Z",
+  "status": "FROZEN_HOLDOUT_BENCHMARK",
+  "hardware": "AMD MI300X (192GB VRAM) + 20 vCPU",
+  "system_2_llm": "Qwen/Qwen3.8-27B-FP8 (vLLM, MTP-2, AITer/CK kernels)",
+  "system_1_arbiter": "AlexWortega/openjev (qwen3.5-4b-nli-v5)",
+  "metrics": {
+    "total_tasks_evaluated": 27,
+    "total_candidates_generated": 54,
+    "candidates_executed_successfully": 35,
+    "pass_rate_pct": 64.81,
+    "decisive_tasks_count": 20,
+    "decisive_rate_pct": 74.07,
+    "ties_count": 1,
+    "tie_rate_pct": 3.70,
+    "both_failed_count": 6,
+    "both_failed_rate_pct": 22.22,
+    "openjev_v5_baseline_tested": 20,
+    "openjev_v5_baseline_correct": 11,
+    "openjev_v5_baseline_accuracy_pct": 55.0
+  },
+  "benchmark_file": "data/crucible_canary/holdout_validation_benchmark.jsonl",
+  "evaluation_script": "scripts/evaluate_holdout.py"
+}
