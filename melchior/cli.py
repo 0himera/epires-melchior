@@ -204,7 +204,7 @@ def main() -> None:
     for run_parser in (crucible_parser, canary_parser):
         run_parser.add_argument("--reasoning-effort", choices=["low", "medium", "xhigh"], default="xhigh")
         run_parser.add_argument("--generation-timeout", type=float, default=600.)
-        run_parser.add_argument("--generation-tokens", type=int, default=12288)
+        run_parser.add_argument("--generation-tokens", type=int, default=16384)
         run_parser.add_argument("--resume", action="store_true", help="Resume an identical run without duplicating completed seeds")
         run_parser.add_argument("--seed-start", type=int, default=1000)
         run_parser.add_argument("--max-hours", type=float, default=None, help="Stop after this session time budget; incomplete tasks can resume")

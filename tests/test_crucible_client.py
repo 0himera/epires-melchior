@@ -68,7 +68,7 @@ async def test_incomplete_pair_is_retried_and_operator_reaches_http_prompt():
         assert 'response_format' not in requests[0]
         assert requests[0]['reasoning_effort'] == 'xhigh'
         assert requests[0]['chat_template_kwargs']['enable_thinking'] is True
-        assert requests[0]['max_tokens'] == 12288
+        assert requests[0]['max_tokens'] == 16384
         assert all(r["messages"][0]["content"] == get_prompt_for_operator("pathology_defense")
                    for r in requests)
     finally:

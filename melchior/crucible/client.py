@@ -81,7 +81,7 @@ class CrucibleLLMClient:
         timeout_s: float = 600.0,
         max_attempts: int = 2,
         reasoning_effort: str = "xhigh",
-        max_tokens: int = 12288,
+        max_tokens: int = 16384,
     ):
         if mode not in {"auto", "api", "opencode", "mock"}:
             raise ValueError(f"Unknown LLM mode: {mode}")

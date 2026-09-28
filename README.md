@@ -65,9 +65,13 @@ melchior crucible --mode api --concurrency 8 --max-hours 3 \
 Qwen запускается в vLLM с `--reasoning-parser qwen3`. Клиент явно включает
 `enable_thinking=True` и отделяет reasoning от JSON двух кандидатов.
 `--reasoning-effort low|medium|xhigh` задаёт уровень (по умолчанию `xhigh`).
-`--generation-tokens 12288` — общий бюджет reasoning + ответа;
+Рабочий режим — всегда `xhigh`.
+`--generation-tokens 16384` — общий бюджет reasoning + ответа;
 `--generation-timeout 600` — таймаут одной попытки генерации. Эти настройки
 сохраняются в manifest; usage и reasoning — в исходных записях, вне NLI-экспорта.
+Для 32 параллельных запросов используем `--concurrency 32 --generation-timeout 1200`.
+Контекст vLLM должен вмещать промпт и весь ответ; сервер настроен на
+`--max-model-len 32768` с `--reasoning-parser qwen3`.
 Полнота JSON-пары проверяется клиентом; обрезанный ответ не становится обучающей
 парой. Constrained decoding отключён: установленный vLLM выдаёт ошибки FSM при
 сочетании JSON Schema, reasoning и MTP. Формат ответа по-прежнему задан промптом,
