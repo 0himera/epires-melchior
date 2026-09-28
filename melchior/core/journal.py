@@ -53,7 +53,11 @@ class Journal:
             f.write(json.dumps(record.model_dump()) + "\n")
 
     def best_record(self, direction: str = "maximize") -> TrialRecord | None:
-        valid = [r for r in self.records if r.actual_metric is not None and r.status == "success"]
+        valid = [
+            r
+            for r in self.records
+            if r.actual_metric is not None and r.status in ["success", "early_stopped"]
+        ]
         if not valid:
             return None
         if direction == "maximize":

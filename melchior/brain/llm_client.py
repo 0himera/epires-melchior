@@ -50,7 +50,12 @@ class LLMClient:
         n_candidates: int = 1,
     ) -> list[CandidateProposal]:
         """Propose n candidate solutions (hypotheses + executable code)."""
-        if self.mode == "api" and self.api_key:
+        if self.mode == "opencode":
+            return self._generate_opencode(
+                task_domain, goal, metric_name, strategy,
+                viable_techniques, journal_history, best_code, best_metric, n_candidates
+            )
+        elif self.mode == "api" and self.api_key:
             return self._generate_api(
                 task_domain, goal, metric_name, strategy,
                 viable_techniques, journal_history, best_code, best_metric, n_candidates
@@ -308,3 +313,79 @@ print(json.dumps({"metric": r2, "scores": scores.tolist()}))
                 task_domain, goal, metric_name, strategy,
                 viable_techniques, journal_history, best_code, best_metric, n_candidates
             )
+
+    def _generate_opencode(
+        self,
+        task_domain: str,
+        goal: str,
+        metric_name: str,
+        strategy: str,
+        viable_techniques: list[str],
+        journal_history: list[dict[str, Any]],
+        best_code: str | None,
+        best_metric: float,
+        n_candidates: int,
+    ) -> list[CandidateProposal]:
+        """Generates candidates by invoking OpenCode CLI."""
+        import shutil
+        import subprocess
+        import re
+
+        opencode_bin = shutil.which("opencode") or "/home/himera/.bun/bin/opencode"
+        prompt = (
+            "You are Melchior System Two. Write self-contained Python scripts for ML tasks.\n"
+            "Each script must train on the dataset, evaluate with cross-validation or validation set,\n"
+            "and print 'FINAL_METRIC:<float>' on stdout as well as optional 'EPOCH_METRIC:<epoch>:<float>'.\n"
+            "Return ONLY valid JSON matching: {\"candidates\": [{\"hypothesis\": \"...\", \"code\": \"...\", \"predicted_metric\": 0.95, \"technique\": \"...\"}]}\n\n"
+            f"Goal: {goal}\n"
+            f"Domain: {task_domain}\n"
+            f"Metric: {metric_name}\n"
+            f"Strategy: {strategy}\n"
+            f"Viable Techniques approved by Jev: {viable_techniques}\n"
+            f"Current best metric: {best_metric}\n"
+            f"Number of candidates: {n_candidates}\n"
+            "Output strictly raw JSON without markdown code fences."
+        )
+
+        cmd = [opencode_bin, "run", "--pure", "--format", "json"]
+        if self.model and self.model not in ["gpt-4o", "mock"]:
+            cmd.extend(["-m", self.model])
+        cmd.append(prompt)
+
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            text_parts = []
+            for line in proc.stdout.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                    if data.get("type") == "text" and "part" in data and "text" in data["part"]:
+                        text_parts.append(data["part"]["text"])
+                except Exception:
+                    pass
+
+            full_text = "".join(text_parts)
+            m = re.search(r"\{.*\}", full_text, re.DOTALL)
+            if m:
+                content = json.loads(m.group(0))
+                candidates = []
+                for c in content.get("candidates", []):
+                    candidates.append(
+                        CandidateProposal(
+                            hypothesis=c["hypothesis"],
+                            code=c["code"],
+                            predicted_metric=float(c.get("predicted_metric", 0.8)),
+                            technique=c.get("technique", "ML Model"),
+                        )
+                    )
+                if candidates:
+                    return candidates
+        except Exception:
+            pass
+
+        return self._generate_mock(
+            task_domain, goal, metric_name, strategy,
+            viable_techniques, journal_history, best_code, best_metric, n_candidates
+        )

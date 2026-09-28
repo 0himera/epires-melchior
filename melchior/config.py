@@ -1,7 +1,18 @@
 """Configuration management for Melchior."""
 
+import shutil
 import os
 from pydantic import BaseModel, Field
+
+
+def _default_llm_mode() -> str:
+    if os.getenv("MELCHIOR_LLM_MODE"):
+        return os.getenv("MELCHIOR_LLM_MODE")
+    if os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"):
+        return "api"
+    if shutil.which("opencode"):
+        return "opencode"
+    return "mock"
 
 
 class Settings(BaseModel):
@@ -18,14 +29,12 @@ class Settings(BaseModel):
         )
     )
 
-    llm_mode: str = Field(
-        default_factory=lambda: os.getenv(
-            "MELCHIOR_LLM_MODE",
-            "api" if os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY") else "mock",
-        )
-    )
+    llm_mode: str = Field(default_factory=_default_llm_mode)
     llm_model: str = Field(
         default_factory=lambda: os.getenv("MELCHIOR_LLM_MODEL", "gpt-4o")
+    )
+    opencode_model: str | None = Field(
+        default_factory=lambda: os.getenv("MELCHIOR_OPENCODE_MODEL")
     )
     llm_base_url: str = Field(
         default_factory=lambda: os.getenv(

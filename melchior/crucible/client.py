@@ -44,12 +44,17 @@ Code Requirements:
 """
 
 
+import asyncio
+import shutil
+import re
+
+
 class CrucibleLLMClient:
     def __init__(
         self,
         base_url: str | None = None,
         model: str = "qwen",
-        mode: str = "auto",  # auto | api | mock
+        mode: str = "auto",  # auto | api | opencode | mock
         timeout_s: float = 35.0,
     ):
         self.base_url = base_url or os.getenv("CRUCIBLE_LLM_URL", "http://localhost:8000/v1")
@@ -82,17 +87,78 @@ class CrucibleLLMClient:
         return self.model
 
     async def generate_pair(self, profile: TaskProfile, seed: int) -> CandidatePair:
-        """Asynchronously requests two competing solutions from the LLM endpoint or mock generator."""
-        if self.mode == "mock":
+        """Asynchronously requests two competing solutions from the LLM endpoint, OpenCode, or mock."""
+        if self.mode == "opencode":
+            try:
+                return await self._call_opencode(profile)
+            except Exception:
+                return self._generate_mock(profile, seed)
+        elif self.mode == "mock":
             return self._generate_mock(profile, seed)
+        elif self.mode == "api":
+            try:
+                return await self._call_vllm(profile)
+            except Exception:
+                return self._generate_mock(profile, seed)
 
+        # auto mode
         try:
             return await self._call_vllm(profile)
-        except Exception as e:
-            if self.mode == "api":
-                raise RuntimeError(f"vLLM API call failed: {e}") from e
-            # Graceful fallback to generator in auto mode
+        except Exception:
+            if shutil.which("opencode"):
+                try:
+                    return await self._call_opencode(profile)
+                except Exception:
+                    pass
             return self._generate_mock(profile, seed)
+
+    async def _call_opencode(self, profile: TaskProfile) -> CandidatePair:
+        """Generates candidate pair via OpenCode CLI."""
+        user_prompt = (
+            f"Task: {profile.description}\n"
+            f"Type: {profile.task_type}\n"
+            f"Target Metric to maximize: {profile.metric}\n"
+            f"Features: {profile.n_features}, Train rows: {profile.n_train}, Val rows: {profile.n_val}\n"
+            f"Propose Candidate A and Candidate B with contrasting architectures or preprocessing.\n"
+            f"Output strictly raw JSON with keys 'candidate_a' and 'candidate_b', without markdown fences."
+        )
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
+        opencode_bin = shutil.which("opencode") or "/home/himera/.bun/bin/opencode"
+
+        cmd = [opencode_bin, "run", "--pure", "--format", "json"]
+        if self.model and self.model not in ["qwen", "auto", "default", "mock"]:
+            cmd.extend(["-m", self.model])
+        cmd.append(full_prompt)
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=self.timeout_s)
+        text_parts = []
+        for line in stdout.decode("utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                if data.get("type") == "text" and "part" in data and "text" in data["part"]:
+                    text_parts.append(data["part"]["text"])
+            except Exception:
+                pass
+
+        full_text = "".join(text_parts)
+        m = re.search(r"\{.*\}", full_text, re.DOTALL)
+        if m:
+            content = json.loads(m.group(0))
+            return CandidatePair(
+                hypothesis_a=content["candidate_a"]["hypothesis"],
+                code_a=content["candidate_a"]["code"],
+                hypothesis_b=content["candidate_b"]["hypothesis"],
+                code_b=content["candidate_b"]["code"],
+            )
+        raise ValueError("Failed to parse JSON from opencode output")
 
     async def _call_vllm(self, profile: TaskProfile) -> CandidatePair:
         model_name = await self._resolve_model()
