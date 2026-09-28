@@ -170,7 +170,7 @@ def main() -> None:
         "--mode", choices=["auto", "api", "mock"], default="auto", help="Mode: auto | api | mock"
     )
     crucible_parser.add_argument(
-        "--pairs", "-n", type=int, default=None, help="Stop after N pairs (default: run until stopped)"
+        "--pairs", "-n", type=int, default=None, help="Attempt at most N pairs, including failures (default: run until stopped)"
     )
     crucible_parser.add_argument(
         "--timeout", type=float, default=12.0, help="Per-candidate timeout in seconds (default: 12.0)"

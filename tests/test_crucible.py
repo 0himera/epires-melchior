@@ -1,6 +1,8 @@
 """Tests for Melchior Crucible execution-grounded dataset generator."""
 
 import json
+import asyncio
+import numpy as np
 import pytest
 from pathlib import Path
 from melchior.crucible.environments import generate_task
@@ -10,27 +12,39 @@ from melchior.crucible.arbiter import CrucibleArbiter
 from melchior.crucible.runner import CrucibleRunner
 
 
-def test_generate_task():
-    profile, X_tr, y_tr, X_va, y_va = generate_task(seed=42)
+@pytest.mark.parametrize("seed", range(6))
+def test_generate_task(seed):
+    profile, X_tr, y_tr, X_va, y_va = generate_task(seed=seed)
     assert profile.n_train == len(X_tr)
     assert profile.n_val == len(X_va)
     assert X_tr.shape[1] == profile.n_features
     assert profile.metric in ["roc_auc", "accuracy", "r2", "f1"]
+    repeated_profile, *repeated_data = generate_task(seed=seed)
+    assert repeated_profile == profile
+    for actual, repeated in zip((X_tr, y_tr, X_va, y_va), repeated_data):
+        np.testing.assert_array_equal(actual, repeated)
 
 
 @pytest.mark.asyncio
 async def test_async_sandbox():
     sandbox = AsyncSandbox(timeout_s=5.0)
-    profile, X_tr, y_tr, X_va, y_va = generate_task(seed=10)
+    X_tr = np.array([[0], [1], [8], [9]])
+    y_tr = np.array([0, 0, 1, 1])
+    X_va = np.array([[0.5], [8.5]])
+    y_va = np.array([0, 1])
 
     code = """
 import numpy as np
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score
 data = np.load("data.npz")
-print("METRIC:0.8950")
+model = DecisionTreeClassifier(max_depth=1, random_state=42).fit(data['X_tr'], data['y_tr'])
+score = accuracy_score(data['y_va'], model.predict(data['X_va']))
+print(f"METRIC:{score}")
 """
     res = await sandbox.execute(code, X_tr, y_tr, X_va, y_va)
     assert res.status == "success"
-    assert res.metric == 0.8950
+    assert res.metric == 1.0
     assert res.wall_time_s > 0
 
 
@@ -89,7 +103,8 @@ async def test_crucible_runner_end_to_end(tmp_path):
         sandbox_timeout_s=5.0,
         max_pairs=3,
     )
-    await runner.run()
+    await asyncio.wait_for(runner.run(), 30)
+    assert runner._total_evaluated == 3
 
     nli_file = out_dir / "openjev_ml_nli.jsonl"
     dpo_file = out_dir / "melchior_dpo_pairs.jsonl"
@@ -100,7 +115,10 @@ async def test_crucible_runner_end_to_end(tmp_path):
     with open(nli_file, "r", encoding="utf-8") as f:
         lines = [json.loads(line) for line in f if line.strip()]
 
-    assert len(lines) >= 3
+    assert 3 <= len(lines) <= 6
+    assert {row['metadata']['task_id'] for row in lines} == {
+        'crucible_task_001000', 'crucible_task_001001', 'crucible_task_001002',
+    }
     for row in lines:
         assert "premise" in row
         assert "hypothesis" in row

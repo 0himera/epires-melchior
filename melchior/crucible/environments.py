@@ -108,7 +108,7 @@ def generate_task(seed: int) -> tuple[TaskProfile, np.ndarray, np.ndarray, np.nd
 
     elif task_variant == 4:
         # Real-world benchmark: Wine or Breast Cancer with random feature mask
-        ds_loader = random.choice([load_breast_cancer, load_wine, load_diabetes])
+        ds_loader = random.Random(seed).choice([load_breast_cancer, load_wine, load_diabetes])
         data = ds_loader()
         X, y = data.data, data.target
         task_type = "regression" if ds_loader == load_diabetes else (

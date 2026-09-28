@@ -3,9 +3,12 @@
 from pathlib import Path
 from melchior.cli import run_experiment_loop
 from melchior.core.journal import Journal
+from melchior.config import config
 
 
-def test_iris_autonomous_research_loop(tmp_path):
+def test_iris_autonomous_research_loop(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "jev_mode", "mock")
+    monkeypatch.setattr(config, "llm_mode", "mock")
     task_yaml = Path(__file__).parent.parent / "examples" / "iris_classification.yaml"
     out_dir = tmp_path / "artifacts"
 
@@ -42,6 +45,6 @@ def test_iris_autonomous_research_loop(tmp_path):
     import subprocess
     import sys
 
-    res = subprocess.run([sys.executable, str(best_file)], capture_output=True, text=True)
+    res = subprocess.run([sys.executable, str(best_file)], capture_output=True, text=True, timeout=30)
     assert res.returncode == 0
     assert "FINAL_METRIC:" in res.stdout

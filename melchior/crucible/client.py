@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import random
 import re
 from dataclasses import dataclass
 import httpx
+from melchior.config import find_opencode_bin
+from melchior.crucible.process import run_process
 from melchior.crucible.environments import TaskProfile
 from melchior.crucible.prompts import (
-    OPERATOR_KEYS,
     get_prompt_for_operator,
     select_operator_by_seed,
 )
@@ -27,6 +29,8 @@ class CandidatePair:
 
 def _parse_candidate_json(raw_text: str, operator: str = "default") -> CandidatePair:
     """Parses raw model output into CandidatePair with fallback extraction."""
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        raise ValueError("LLM response content must be a non-empty string")
     raw_text = raw_text.strip()
     if raw_text.startswith("```"):
         raw_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.MULTILINE).strip()
@@ -36,7 +40,7 @@ def _parse_candidate_json(raw_text: str, operator: str = "default") -> Candidate
 
     try:
         content = json.loads(raw_text)
-    except Exception:
+    except json.JSONDecodeError:
         start = raw_text.find("{")
         end = raw_text.rfind("}")
         if start != -1 and end != -1 and end > start:
@@ -44,29 +48,26 @@ def _parse_candidate_json(raw_text: str, operator: str = "default") -> Candidate
         else:
             raise ValueError(f"Failed to find JSON object in LLM output: {raw_text[:200]}")
 
-    cand_a = content.get("candidate_a") or content.get("Candidate_A") or {}
-    cand_b = content.get("candidate_b") or content.get("Candidate_B") or {}
-
-    hyp_a = cand_a.get("hypothesis", "")
-    code_a = cand_a.get("code", "")
-    hyp_b = cand_b.get("hypothesis", "")
-    code_b = cand_b.get("code", "")
-
-    if not code_a or not code_b:
-        raise ValueError("Missing code_a or code_b in LLM response")
+    if not isinstance(content, dict):
+        raise ValueError("LLM response must be a JSON object")
+    candidates = []
+    for key, alias in [("candidate_a", "Candidate_A"), ("candidate_b", "Candidate_B")]:
+        candidate = content.get(key, content.get(alias))
+        if not isinstance(candidate, dict):
+            raise ValueError(f"Missing or invalid {key} in LLM response")
+        for field in ("hypothesis", "code"):
+            if not isinstance(candidate.get(field), str) or not candidate[field].strip():
+                raise ValueError(f"{key}.{field} must be a non-empty string")
+        candidates.append(candidate)
+    cand_a, cand_b = candidates
 
     return CandidatePair(
-        hypothesis_a=hyp_a,
-        code_a=code_a,
-        hypothesis_b=hyp_b,
-        code_b=code_b,
+        hypothesis_a=cand_a["hypothesis"],
+        code_a=cand_a["code"],
+        hypothesis_b=cand_b["hypothesis"],
+        code_b=cand_b["code"],
         operator=operator,
     )
-
-
-import asyncio
-import shutil
-import re
 
 
 class CrucibleLLMClient:
@@ -76,11 +77,17 @@ class CrucibleLLMClient:
         model: str = "qwen",
         mode: str = "auto",  # auto | api | opencode | mock
         timeout_s: float = 35.0,
+        max_attempts: int = 2,
     ):
+        if mode not in {"auto", "api", "opencode", "mock"}:
+            raise ValueError(f"Unknown LLM mode: {mode}")
+        if max_attempts < 1 or timeout_s <= 0:
+            raise ValueError("max_attempts and timeout_s must be positive")
         self.base_url = base_url or os.getenv("CRUCIBLE_LLM_URL", "http://localhost:8000/v1")
         self.model = model or os.getenv("CRUCIBLE_LLM_MODEL", "qwen")
         self.timeout_s = timeout_s
         self.mode = mode
+        self.max_attempts = max_attempts
         self._http_client = httpx.AsyncClient(timeout=timeout_s)
         self._model_resolved = False
 
@@ -112,36 +119,27 @@ class CrucibleLLMClient:
         """Asynchronously requests two competing solutions from the LLM endpoint, OpenCode, or mock."""
         selected_op = operator or select_operator_by_seed(seed)
 
-        if self.mode == "opencode":
-            try:
-                return await self._call_opencode(profile, selected_op)
-            except Exception:
-                return self._generate_mock(profile, seed, selected_op)
-        elif self.mode == "mock":
+        if self.mode == "mock":
             return self._generate_mock(profile, seed, selected_op)
-        elif self.mode == "api":
-            try:
-                return await self._call_vllm(profile, selected_op)
-            except Exception:
-                return self._generate_mock(profile, seed, selected_op)
 
-        # auto mode
-        try:
-            return await self._call_vllm(profile, selected_op)
-        except Exception:
-            if shutil.which("opencode"):
+        backends = [self.mode] if self.mode != "auto" else ["api"]
+        if self.mode == "auto" and find_opencode_bin():
+            backends.append("opencode")
+        errors = []
+        for backend in backends:
+            for attempt in range(1, self.max_attempts + 1):
                 try:
-                    return await self._call_opencode(profile, selected_op)
-                except Exception:
-                    pass
-            return self._generate_mock(profile, seed, selected_op)
+                    call = self._call_opencode if backend == "opencode" else self._call_vllm
+                    return await asyncio.wait_for(call(profile, selected_op), self.timeout_s)
+                except Exception as exc:
+                    errors.append(f"{backend} attempt {attempt}: {type(exc).__name__}: {exc}")
+                    last_error = exc
+        raise RuntimeError("Candidate generation failed; " + "; ".join(errors)) from last_error
 
     async def _call_opencode(
         self, profile: TaskProfile, operator: str = "inductive_bias"
     ) -> CandidatePair:
         """Generates candidate pair via OpenCode CLI."""
-        from melchior.config import find_opencode_bin
-
         user_prompt = (
             f"Dataset Profile:\n"
             f"- Description: {profile.description}\n"
@@ -160,12 +158,11 @@ class CrucibleLLMClient:
             cmd.extend(["-m", self.model])
         cmd.append(full_prompt)
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=self.timeout_s)
+        result = await run_process(cmd, timeout_s=self.timeout_s)
+        if result.returncode != 0:
+            raise RuntimeError(f"OpenCode exited with code {result.returncode}: "
+                               f"{result.stderr.decode(errors='replace')[-500:]}")
+        stdout = result.stdout
         text_parts = []
         for line in stdout.decode("utf-8", errors="replace").splitlines():
             line = line.strip()
@@ -214,7 +211,10 @@ class CrucibleLLMClient:
         resp.raise_for_status()
         data = resp.json()
 
-        raw_content = data["choices"][0]["message"]["content"].strip()
+        choice = data["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise ValueError("LLM response was truncated by the token limit")
+        raw_content = choice["message"]["content"]
         return _parse_candidate_json(raw_content, operator=operator)
 
     def _generate_mock(self, profile: TaskProfile, seed: int, operator: str = "inductive_bias") -> CandidatePair:

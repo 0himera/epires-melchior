@@ -7,13 +7,12 @@ import json
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any
 import httpx
 
 from melchior.crucible.environments import generate_task, TaskProfile
 from melchior.crucible.client import CrucibleLLMClient, CandidatePair
-from melchior.crucible.sandbox import AsyncSandbox, SandboxResult
-from melchior.crucible.arbiter import CrucibleArbiter, ArbiterOutcome
+from melchior.crucible.sandbox import AsyncSandbox
+from melchior.crucible.arbiter import CrucibleArbiter
 
 
 @dataclass
@@ -36,6 +35,9 @@ class CanaryEvaluation:
     hypothesis_b: str
     code_a: str
     code_b: str
+    operator: str = "unknown"
+    cand_a_stderr: str = ""
+    cand_b_stderr: str = ""
     jev_choice: str | None = None
     jev_confidence: float | None = None
     jev_correct: bool | None = None
@@ -53,6 +55,8 @@ class CanaryRunner:
         sandbox_timeout_s: float = 14.0,
         min_delta: float = 0.01,
     ):
+        if num_tasks < 0 or concurrency < 1:
+            raise ValueError("num_tasks must be non-negative and concurrency positive")
         self.num_tasks = num_tasks
         self.concurrency = concurrency
         self.llm_url = llm_url
@@ -65,6 +69,8 @@ class CanaryRunner:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.holdout_file = self.output_dir / "holdout_validation_50.jsonl"
         self.summary_file = self.output_dir / "canary_summary.json"
+        self.evaluations_file = self.output_dir / "canary_evaluations.jsonl"
+        self.errors_file = self.output_dir / "canary_errors.jsonl"
 
         self.arbiter = CrucibleArbiter(min_delta=self.min_delta)
         self.sandbox = AsyncSandbox(timeout_s=self.sandbox_timeout_s)
@@ -76,6 +82,8 @@ class CanaryRunner:
         )
         self.http_client = httpx.AsyncClient(timeout=10.0)
         self.evaluations: list[CanaryEvaluation] = []
+        self.errors: list[dict] = []
+        self._start_time = 0.0
 
     async def _query_openjev(
         self, profile: TaskProfile, pair: CandidatePair
@@ -154,123 +162,120 @@ class CanaryRunner:
             hypothesis_b=pair.hypothesis_b,
             code_a=pair.code_a,
             code_b=pair.code_b,
+            operator=pair.operator,
+            cand_a_stderr=res_a.stderr,
+            cand_b_stderr=res_b.stderr,
             jev_choice=jev_choice,
             jev_confidence=jev_conf,
             jev_correct=jev_correct,
         )
 
-    async def run(self):
-        print("=" * 70)
-        print("          MELCHIOR CRUCIBLE CANARY RUN & BASELINE BENCHMARK")
-        print("=" * 70)
-        print(f"[*] Tasks to evaluate:    {self.num_tasks}")
-        print(f"[*] Concurrency workers:  {self.concurrency}")
-        print(f"[*] LLM Endpoint (Sys 2): {self.llm_url} (model: {self.llm_model})")
-        print(f"[*] Jev Endpoint (Sys 1): {self.jev_url}")
-        print(f"[*] Sandbox Timeout:      {self.sandbox_timeout_s}s")
-        print(f"[*] Output directory:     {self.output_dir.resolve()}\n")
+    @staticmethod
+    def _append(path: Path, record: dict) -> None:
+        # Closing after every row preserves completed work even if the process
+        # subsequently crashes; no await occurs between recording and checkpointing.
+        with path.open("a", encoding="utf-8") as file:
+            file.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        start_time = time.time()
-        sem = asyncio.Semaphore(self.concurrency)
+    def _write_summary(self, status: str) -> dict:
+        total = len(self.evaluations)
+        candidates = total * 2
+        successful = sum(
+            e.cand_a_status == "success" for e in self.evaluations
+        ) + sum(e.cand_b_status == "success" for e in self.evaluations)
+        timeouts = sum(
+            e.cand_a_status == "timeout" for e in self.evaluations
+        ) + sum(e.cand_b_status == "timeout" for e in self.evaluations)
+        decisive = [e for e in self.evaluations if e.is_decisive]
+        judged = [e for e in decisive if e.jev_correct is not None]
+        correct = sum(e.jev_correct is True for e in judged)
 
-        async def _bounded_task(seed: int, idx: int):
-            async with sem:
-                res = await self._process_task(seed)
-                status_icon = "✓" if res.is_decisive else "•"
-                winner_str = f"Winner: {res.winner} (Δ={res.delta:.3f})" if res.is_decisive else f"Result: {res.winner}"
-                jev_str = f"| Jev: {res.jev_choice} (corr={res.jev_correct})" if res.jev_choice else ""
-                print(f"[{idx+1:02d}/{self.num_tasks:02d}] {status_icon} Task {res.task_id} | {winner_str} {jev_str}")
-                return res
-
-        tasks = [_bounded_task(seed, i) for i, seed in enumerate(range(1001, 1001 + self.num_tasks))]
-        self.evaluations = await asyncio.gather(*tasks)
-
-        elapsed = time.time() - start_time
-        await self.client.close()
-        await self.http_client.aclose()
-
-        # ==================== ANALYSIS & REPORT ====================
-        total_tasks = len(self.evaluations)
-        total_candidates = total_tasks * 2
-
-        # 1. Pass Rate
-        success_a = sum(1 for e in self.evaluations if e.cand_a_status == "success")
-        success_b = sum(1 for e in self.evaluations if e.cand_b_status == "success")
-        total_success = success_a + success_b
-        pass_rate = (total_success / total_candidates) * 100.0
-
-        timeouts_a = sum(1 for e in self.evaluations if e.cand_a_status == "timeout")
-        timeouts_b = sum(1 for e in self.evaluations if e.cand_b_status == "timeout")
-        total_timeouts = timeouts_a + timeouts_b
-        timeout_rate = (total_timeouts / total_candidates) * 100.0
-
-        all_times = [e.cand_a_time for e in self.evaluations] + [e.cand_b_time for e in self.evaluations]
-        avg_time = sum(all_times) / len(all_times) if all_times else 0.0
-
-        # 2. Decisive Rate & Margins
-        decisive_evals = [e for e in self.evaluations if e.is_decisive]
-        decisive_count = len(decisive_evals)
-        decisive_rate = (decisive_count / total_tasks) * 100.0
-
-        ties = [e for e in self.evaluations if e.winner == "TIE"]
-        both_failed = [e for e in self.evaluations if e.winner == "BOTH_FAILED"]
-        tie_rate = (len(ties) / total_tasks) * 100.0
-        failed_rate = (len(both_failed) / total_tasks) * 100.0
-
-        avg_margin = (
-            sum(e.delta for e in decisive_evals) / decisive_count if decisive_count > 0 else 0.0
-        )
-
-        # 3. OpenJev Baseline Accuracy
-        evaluated_jev = [e for e in decisive_evals if e.jev_correct is not None]
-        correct_jev = sum(1 for e in evaluated_jev if e.jev_correct is True)
-        jev_accuracy = (correct_jev / len(evaluated_jev) * 100.0) if evaluated_jev else 0.0
-
-        # Save Holdout Set
-        with open(self.holdout_file, "w", encoding="utf-8") as f:
-            for e in decisive_evals:
-                f.write(json.dumps(asdict(e), ensure_ascii=False) + "\n")
+        def percent(n, d):
+            return round(100 * n / d, 2) if d else 0.0
 
         summary = {
-            "total_tasks": total_tasks,
-            "elapsed_seconds": round(elapsed, 2),
-            "pass_rate_pct": round(pass_rate, 2),
-            "timeout_rate_pct": round(timeout_rate, 2),
-            "avg_wall_time_s": round(avg_time, 2),
-            "decisive_rate_pct": round(decisive_rate, 2),
-            "tie_rate_pct": round(tie_rate, 2),
-            "both_failed_rate_pct": round(failed_rate, 2),
-            "avg_winning_margin": round(avg_margin, 4),
-            "openjev_baseline_tested": len(evaluated_jev),
-            "openjev_baseline_correct": correct_jev,
-            "openjev_baseline_accuracy_pct": round(jev_accuracy, 2),
+            "status": status,
+            "requested_tasks": self.num_tasks,
+            "completed_tasks": total + len(self.errors),
+            "failed_tasks": len(self.errors),
+            "total_tasks": total,
+            "total_candidates": candidates,
+            "elapsed_seconds": round(time.monotonic() - self._start_time, 2),
+            "pass_rate_pct": percent(successful, candidates),
+            "timeout_rate_pct": percent(timeouts, candidates),
+            "avg_wall_time_s": round(sum(
+                e.cand_a_time + e.cand_b_time for e in self.evaluations
+            ) / candidates, 2) if candidates else 0.0,
+            "decisive_rate_pct": percent(len(decisive), total),
+            "tie_rate_pct": percent(sum(e.winner == "TIE" for e in self.evaluations), total),
+            "both_failed_rate_pct": percent(
+                sum(e.winner == "BOTH_FAILED" for e in self.evaluations), total,
+            ),
+            "avg_winning_margin": round(sum(e.delta for e in decisive) / len(decisive), 4)
+            if decisive else 0.0,
+            "openjev_baseline_tested": len(judged),
+            "openjev_baseline_correct": correct,
+            "openjev_baseline_accuracy_pct": percent(correct, len(judged)),
             "holdout_file": str(self.holdout_file),
+            "evaluations_file": str(self.evaluations_file),
+            "errors_file": str(self.errors_file),
         }
-        with open(self.summary_file, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=2, ensure_ascii=False)
+        temporary = self.summary_file.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        temporary.replace(self.summary_file)
+        return summary
 
-        print("\n" + "=" * 70)
-        print("                   CANARY RUN CALIBRATION RESULTS")
-        print("=" * 70)
-        print(f"Elapsed Time:                {elapsed:.1f}s ({(total_tasks / elapsed) * 60:.1f} pairs/min)")
-        print("\n[A. ТЕХНИЧЕСКАЯ КАЛИБРОВКА (SANITY CHECK)]")
-        print(f"  • Pass Rate генератора:    {pass_rate:.1f}% ({total_success}/{total_candidates} скриптов)")
-        pass_grade = "ОТЛИЧНО (>75%)" if pass_rate >= 75 else ("НОРМАЛЬНО (50-75%)" if pass_rate >= 50 else "ТРЕБУЕТ ДОРАБОТКИ (<50%)")
-        print(f"    Вердикт:                 {pass_grade}")
-        print(f"  • Timeout Rate (14s):      {timeout_rate:.1f}% ({total_timeouts}/{total_candidates})")
-        print(f"  • Среднее время обучения:  {avg_time:.2f}s на скрипт")
+    async def run(self) -> dict:
+        print(f"[*] Canary: {self.num_tasks} tasks, {self.concurrency} workers")
+        print(f"[*] LLM: {self.llm_url}; Jev: {self.jev_url}")
+        self._start_time = time.monotonic()
+        self.evaluations.clear()
+        self.errors.clear()
+        tasks = []
+        status = "failed"
+        sem = asyncio.Semaphore(self.concurrency)
 
-        print("\n[Б. СОДЕРЖАТЕЛЬНАЯ КАЛИБРОВКА (РАЗНООБРАЗИЕ И ДЕЛЬТА)]")
-        print(f"  • Decisive Rate (Δ >= 0.01): {decisive_rate:.1f}% ({decisive_count}/{total_tasks} пар)")
-        print(f"  • Ничьи (Δ < 0.01):        {tie_rate:.1f}% ({len(ties)}/{total_tasks})")
-        print(f"  • Оба решения упали:       {failed_rate:.1f}% ({len(both_failed)}/{total_tasks})")
-        print(f"  • Средняя маржа победителя: Δ = {avg_margin:.4f}")
+        async def evaluate(seed: int):
+            async with sem:
+                try:
+                    result = await self._process_task(seed)
+                except Exception as exc:
+                    error = {
+                        "seed": seed, "task_id": f"crucible_task_{seed:06d}",
+                        "error_type": type(exc).__name__, "error": str(exc),
+                    }
+                    self._append(self.errors_file, error)
+                    self.errors.append(error)
+                    print(f"[!] {error['task_id']}: {error['error_type']}: {exc}", flush=True)
+                else:
+                    record = asdict(result)
+                    self._append(self.evaluations_file, record)
+                    if result.is_decisive:
+                        self._append(self.holdout_file, record)
+                    self.evaluations.append(result)
+                    print(f"[+] {result.task_id}: {result.winner} (Δ={result.delta:.3f})", flush=True)
+                self._write_summary("running")
 
-        print("\n[В. BASELINE BENCHMARK ДЛЯ OPENJEV (ТОЧКА ОТСЧЁТА)]")
-        print(f"  • Оценено пар в OpenJev:   {len(evaluated_jev)}")
-        print(f"  • Угадано верно дефолтным: {correct_jev} / {len(evaluated_jev)}")
-        print(f"  • Baseline Accuracy:       {jev_accuracy:.1f}% (чистый априорный рандом ~50%)")
-        print(f"  • Замороженный Holdout:    {self.holdout_file}")
-        print(f"  • JSON Сводка:             {self.summary_file}")
-        print("=" * 70 + "\n")
+        try:
+            for path in (self.evaluations_file, self.errors_file, self.holdout_file):
+                path.write_text("", encoding="utf-8")
+            self._write_summary("running")
+            tasks = [asyncio.create_task(evaluate(seed))
+                     for seed in range(1001, 1001 + self.num_tasks)]
+            await asyncio.gather(*tasks)
+            status = "completed_with_errors" if self.errors else "completed"
+        except asyncio.CancelledError:
+            status = "interrupted"
+            raise
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.gather(self.client.close(), self.http_client.aclose())
+            finally:
+                summary = self._write_summary(status)
+        print(f"[*] Canary {status}: {summary['total_tasks']} evaluated, "
+              f"{summary['failed_tasks']} errors. Saved {self.summary_file}")
         return summary

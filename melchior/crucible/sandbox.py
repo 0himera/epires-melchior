@@ -1,8 +1,8 @@
-"""Async isolated sandbox for high-throughput candidate execution."""
+"""Async candidate execution with time and memory limits."""
 
 from __future__ import annotations
 
-import asyncio
+import math
 import os
 import re
 import sys
@@ -10,7 +10,10 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
 import numpy as np
+
+from melchior.crucible.process import run_process
 
 
 @dataclass
@@ -22,117 +25,72 @@ class SandboxResult:
     stderr: str
 
 
-import signal
-
-
-def _set_limits():
-    """Sets memory limit to 2GB per subprocess and starts a new session to prevent zombies."""
-    try:
-        if hasattr(os, "setsid"):
-            os.setsid()
-        import resource
-        limit_bytes = 2 * 1024 * 1024 * 1024  # 2 GB
-        resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
-    except (ImportError, ValueError, OSError):
-        pass
+# Apply limits in the new interpreter, avoiding preexec_fn in a threaded parent.
+_LAUNCHER = """
+import os, runpy, sys
+if os.name != 'nt':
+    import resource
+    limit = 2 * 1024 * 1024 * 1024
+    resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+runpy.run_path(sys.argv[1], run_name='__main__')
+"""
 
 
 class AsyncSandbox:
     def __init__(self, timeout_s: float = 12.0, python_executable: str | None = None):
+        if timeout_s <= 0:
+            raise ValueError("timeout_s must be positive")
         self.timeout_s = timeout_s
         self.python_executable = python_executable or sys.executable
 
     async def execute(
-        self,
-        code: str,
-        X_train: np.ndarray,
-        y_train: np.ndarray,
-        X_val: np.ndarray,
-        y_val: np.ndarray,
+        self, code: str, X_train: np.ndarray, y_train: np.ndarray,
+        X_val: np.ndarray, y_val: np.ndarray,
     ) -> SandboxResult:
-        """Saves data.npz and code in a temporary directory, runs asynchronously, and measures metric."""
-        temp_dir = Path(tempfile.mkdtemp(prefix="crucible_run_"))
-        data_path = temp_dir / "data.npz"
-        np.savez_compressed(data_path, X_tr=X_train, y_tr=y_train, X_va=X_val, y_va=y_val)
-
-        script_path = temp_dir / "solution.py"
-        script_path.write_text(code, encoding="utf-8")
-
-        start = time.time()
-        stdout_data = ""
-        stderr_data = ""
+        start = time.monotonic()
+        stdout_data = stderr_data = ""
         status = "success"
         metric = None
-        sub_env = os.environ.copy()
-        sub_env.update({
-            "OMP_NUM_THREADS": "1",
-            "OPENBLAS_NUM_THREADS": "1",
-            "MKL_NUM_THREADS": "1",
-            "VECLIB_MAXIMUM_THREADS": "1",
-            "NUMEXPR_NUM_THREADS": "1",
-        })
-
         try:
-            proc = await asyncio.create_subprocess_exec(
-                self.python_executable,
-                "-u",
-                str(script_path),
-                cwd=str(temp_dir),
-                env=sub_env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                preexec_fn=_set_limits if os.name != "nt" else None,
-            )
-
-            try:
-                raw_out, raw_err = await asyncio.wait_for(
-                    proc.communicate(), timeout=self.timeout_s
+            with tempfile.TemporaryDirectory(prefix="crucible_run_") as directory:
+                workdir = Path(directory)
+                np.savez_compressed(
+                    workdir / "data.npz", X_tr=X_train, y_tr=y_train, X_va=X_val, y_va=y_val,
                 )
-                stdout_data = raw_out.decode("utf-8", errors="replace")
-                stderr_data = raw_err.decode("utf-8", errors="replace")
-
-                if proc.returncode != 0:
+                script = workdir / "solution.py"
+                script.write_text(code, encoding="utf-8")
+                env = os.environ.copy()
+                env.update(dict.fromkeys([
+                    "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                    "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS",
+                ], "1"))
+                remaining = self.timeout_s - (time.monotonic() - start)
+                if remaining <= 0:
+                    raise TimeoutError(f"Execution exceeded timeout of {self.timeout_s}s")
+                result = await run_process(
+                    [self.python_executable, "-u", "-c", _LAUNCHER, str(script)],
+                    timeout_s=remaining, cwd=workdir, env=env,
+                )
+                stdout_data = result.stdout.decode("utf-8", errors="replace")
+                stderr_data = result.stderr.decode("utf-8", errors="replace")
+                if result.returncode != 0:
                     status = "failed"
                 else:
-                    # Extract METRIC:<float>
-                    m = re.search(r"METRIC:([0-9\.\-]+)", stdout_data)
-                    if m:
-                        metric = float(m.group(1))
-                    else:
-                        status = "failed"
-                        stderr_data += "\nNo METRIC:<val> output detected."
-
-            except asyncio.TimeoutError:
-                status = "timeout"
-                try:
-                    if os.name != "nt":
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    else:
-                        proc.kill()
-                    await proc.wait()
-                except (ProcessLookupError, OSError):
-                    pass
-                stderr_data = f"Execution exceeded timeout of {self.timeout_s}s"
-
-        except Exception as e:
+                    matches = re.findall(r"^METRIC:\s*(\S+)\s*$", stdout_data, re.MULTILINE)
+                    if len(matches) != 1:
+                        raise ValueError("Expected exactly one METRIC:<finite float> output")
+                    metric = float(matches[0])
+                    if not math.isfinite(metric):
+                        metric = None
+                        raise ValueError("METRIC must be finite")
+        except TimeoutError as exc:
+            status = "timeout"
+            stderr_data += f"\n{exc}"
+        except Exception as exc:
             status = "failed"
-            stderr_data = str(e)
-        finally:
-            # Cleanup temp folder
-            try:
-                if data_path.exists():
-                    data_path.unlink()
-                if script_path.exists():
-                    script_path.unlink()
-                temp_dir.rmdir()
-            except OSError:
-                pass
-
-        wall_time_s = round(time.time() - start, 3)
+            metric = None
+            stderr_data += f"\n{type(exc).__name__}: {exc}"
+        # CancelledError deliberately propagates after process and directory cleanup.
         return SandboxResult(
-            status=status,
-            metric=metric,
-            wall_time_s=wall_time_s,
-            stdout=stdout_data,
-            stderr=stderr_data,
+            status, metric, round(time.monotonic() - start, 3), stdout_data, stderr_data,
         )

@@ -23,6 +23,8 @@ class CrucibleRunner:
         sandbox_timeout_s: float = 12.0,
         max_pairs: int | None = None,
     ):
+        if concurrency < 1 or (max_pairs is not None and max_pairs < 0):
+            raise ValueError("concurrency must be positive and max_pairs non-negative")
         self.concurrency = concurrency
         self.output_dir = Path(output_dir)
         self.llm_base_url = llm_base_url
@@ -34,6 +36,7 @@ class CrucibleRunner:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.nli_file = self.output_dir / "openjev_ml_nli.jsonl"
         self.dpo_file = self.output_dir / "melchior_dpo_pairs.jsonl"
+        self.errors_file = self.output_dir / "crucible_errors.jsonl"
 
         self.arbiter = CrucibleArbiter(min_delta=0.005)
         self.sandbox = AsyncSandbox(timeout_s=self.sandbox_timeout_s)
@@ -49,7 +52,7 @@ class CrucibleRunner:
         self._dpo_rows_written = 0
         self._start_time = 0.0
 
-    async def _worker(self, worker_id: int, queue: asyncio.Queue[int]):
+    async def _worker(self, worker_id: int, queue: asyncio.Queue[int | None]):
         """Individual worker loop processing tasks."""
         while True:
             seed = await queue.get()
@@ -102,8 +105,10 @@ class CrucibleRunner:
                         )
 
             except Exception as e:
-                # Avoid crash of worker on single task failure
-                pass
+                error = {"seed": seed, "error_type": type(e).__name__, "error": str(e)}
+                with self.errors_file.open("a", encoding="utf-8") as file:
+                    file.write(json.dumps(error, ensure_ascii=False) + "\n")
+                print(f"[!] Task {seed}: {type(e).__name__}: {e}", flush=True)
             finally:
                 queue.task_done()
 
@@ -128,12 +133,11 @@ class CrucibleRunner:
         # Producer feed
         seed = 1000
         try:
-            while True:
-                if self.max_pairs is not None and self._total_evaluated >= self.max_pairs:
-                    break
+            # Bound submitted attempts, including failures. Counting only completed
+            # successes overshoots the limit and runs forever when the API is down.
+            while self.max_pairs is None or seed - 1000 < self.max_pairs:
                 await queue.put(seed)
                 seed += 1
-                await asyncio.sleep(0.01)
 
             # Signal termination
             for _ in range(self.concurrency):
@@ -141,14 +145,11 @@ class CrucibleRunner:
 
             await asyncio.gather(*workers)
 
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            print("\n[!] Gracefully stopping workers and saving flushed state...")
-            for _ in range(self.concurrency):
-                try:
-                    queue.put_nowait(None)
-                except asyncio.QueueFull:
-                    pass
         finally:
+            for worker in workers:
+                if not worker.done():
+                    worker.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
             await self.client.close()
             elapsed = time.time() - self._start_time
             print(f"\n[✓] Crucible finished in {elapsed:.1f}s.")
