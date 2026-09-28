@@ -30,10 +30,12 @@ class LLMClient:
         mode: str = "mock",
         model: str = "gpt-4o",
         api_key: str | None = None,
+        base_url: str = "https://api.openai.com/v1",
     ):
         self.mode = mode
         self.model = model
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.base_url = base_url
 
     def generate_candidates(
         self,
@@ -280,11 +282,11 @@ print(json.dumps({"metric": r2, "scores": scores.tolist()}))
         }
         try:
             req = urllib.request.Request(
-                "https://api.openai.com/v1/chat/completions",
+                f"{self.base_url.rstrip('/')}/chat/completions",
                 data=json.dumps(payload).encode("utf-8"),
                 headers={
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}",
+                    "Authorization": f"Bearer {self.api_key or 'token'}",
                 },
                 method="POST",
             )

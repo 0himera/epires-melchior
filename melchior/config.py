@@ -27,6 +27,12 @@ class Settings(BaseModel):
     llm_model: str = Field(
         default_factory=lambda: os.getenv("MELCHIOR_LLM_MODEL", "gpt-4o")
     )
+    llm_base_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "OPENAI_BASE_URL",
+            os.getenv("MELCHIOR_LLM_BASE_URL", "https://api.openai.com/v1"),
+        )
+    )
     openai_api_key: str | None = Field(
         default_factory=lambda: os.getenv("OPENAI_API_KEY")
     )

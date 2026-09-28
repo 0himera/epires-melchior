@@ -38,6 +38,7 @@ def run_experiment_loop(
         mode=config.llm_mode,
         model=config.llm_model,
         api_key=config.openai_api_key,
+        base_url=config.llm_base_url,
     )
 
     strategist = Strategist(jev=jev, llm=llm)
