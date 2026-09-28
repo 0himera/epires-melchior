@@ -167,7 +167,7 @@ async def main():
         base_url=args.url,
         model=args.model,
         mode=args.mode,
-        timeout_s=300.0, reasoning_effort=args.reasoning_effort,
+        timeout_s=600.0, reasoning_effort=args.reasoning_effort,
     )
     sandbox = AsyncSandbox(timeout_s=15.0)
     arbiter = CrucibleArbiter(min_delta=0.005)

@@ -66,7 +66,7 @@ Qwen запускается в vLLM с `--reasoning-parser qwen3`. Клиент 
 `enable_thinking=True` и отделяет reasoning от JSON двух кандидатов.
 `--reasoning-effort low|medium|xhigh` задаёт уровень (по умолчанию `xhigh`).
 `--generation-tokens 12288` — общий бюджет reasoning + ответа;
-`--generation-timeout 300` — таймаут одной попытки генерации. Эти настройки
+`--generation-timeout 600` — таймаут одной попытки генерации. Эти настройки
 сохраняются в manifest; usage и reasoning — в исходных записях, вне NLI-экспорта.
 Полнота JSON-пары проверяется клиентом; обрезанный ответ не становится обучающей
 парой. Constrained decoding отключён: установленный vLLM выдаёт ошибки FSM при

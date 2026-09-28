@@ -77,7 +77,7 @@ class CrucibleLLMClient:
         base_url: str | None = None,
         model: str = "qwen",
         mode: str = "auto",  # auto | api | opencode | mock
-        timeout_s: float = 35.0,
+        timeout_s: float = 600.0,
         max_attempts: int = 2,
         reasoning_effort: str = "xhigh",
         max_tokens: int = 12288,

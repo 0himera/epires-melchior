@@ -31,7 +31,7 @@ class CrucibleRunner:
                  llm_model='qwen', llm_mode='auto', sandbox_timeout_s=12., max_pairs=None,
                  *, split='train', seed_start=1000, resume=False, max_hours=None,
                  min_delta=0.005, jev_url=None, reasoning_effort='xhigh',
-                 generation_timeout_s=300., generation_max_tokens=12288):
+                 generation_timeout_s=600., generation_max_tokens=12288):
         if concurrency < 1 or (max_pairs is not None and max_pairs < 0) or seed_start < 0:
             raise ValueError('Invalid concurrency, pair budget or starting seed')
         if split not in {'train', 'eval'} or (max_hours is not None and max_hours <= 0):
