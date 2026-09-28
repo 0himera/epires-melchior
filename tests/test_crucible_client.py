@@ -67,6 +67,8 @@ async def test_incomplete_pair_is_retried_and_operator_reaches_http_prompt():
         assert requests[0]['max_tokens'] == 12288
         schema = requests[0]['response_format']['json_schema']['schema']
         assert set(schema['required']) == {'candidate_a', 'candidate_b'}
+        # Deployment regression: minLength prevents escaped newlines in this vLLM build.
+        assert 'minLength' not in schema['properties']['candidate_a']['properties']['code']
         assert all(r["messages"][0]["content"] == get_prompt_for_operator("pathology_defense")
                    for r in requests)
     finally:

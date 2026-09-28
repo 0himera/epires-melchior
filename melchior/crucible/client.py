@@ -34,7 +34,9 @@ CANDIDATE_SCHEMA = {
     "properties": {name: {
         "type": "object", "additionalProperties": False,
         "required": ["hypothesis", "code"],
-        "properties": {field: {"type": "string", "minLength": 1} for field in ("hypothesis", "code")},
+        # vLLM 0.27.1.dev5 on this server masks escaped newlines when
+        # minLength is present. Enforce non-empty strings in the parser instead.
+        "properties": {field: {"type": "string"} for field in ("hypothesis", "code")},
     } for name in ("candidate_a", "candidate_b")},
 }
 
