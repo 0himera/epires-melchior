@@ -61,6 +61,9 @@ async def test_incomplete_pair_is_retried_and_operator_reaches_http_prompt():
         pair = await client.generate_pair(profile, 42, operator="pathology_defense")
         assert pair.code_b == VALID_PAIR["candidate_b"]["code"]
         assert len(requests) == 2
+        assert len(pair.generation['attempts']) == 2
+        assert pair.generation['attempts'][0]['error_type'] == 'ValueError'
+        assert pair.generation['attempts'][1]['status'] == 'success'
         # Server regression: guided JSON decoding fails with reasoning + MTP.
         assert 'response_format' not in requests[0]
         assert requests[0]['reasoning_effort'] == 'xhigh'

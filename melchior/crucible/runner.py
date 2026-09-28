@@ -121,7 +121,10 @@ class CrucibleRunner:
         status = 'failed'
         try:
             if self.llm_mode != 'mock':
-                self.manifest['resolved_model'] = await self.client._resolve_model()
+                startup_timeout = self.client.timeout_s
+                if self.max_hours is not None:
+                    startup_timeout = min(startup_timeout, self.max_hours * 3600)
+                self.manifest['resolved_model'] = await asyncio.wait_for(self.client._resolve_model(), startup_timeout)
             store = RunStore(self.output_dir, self.manifest, resume=self.resume)
             done = store.completed()
             store.export()

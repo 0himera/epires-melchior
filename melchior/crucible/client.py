@@ -7,6 +7,7 @@ import json
 import os
 import random
 import re
+import time
 from dataclasses import dataclass, field
 import httpx
 from melchior.config import find_opencode_bin
@@ -135,13 +136,22 @@ class CrucibleLLMClient:
         attempts = []
         for backend in backends:
             for attempt in range(1, self.max_attempts + 1):
+                started = time.monotonic()
                 try:
                     call = self._call_opencode if backend == "opencode" else self._call_vllm
-                    return await asyncio.wait_for(call(profile, selected_op), self.timeout_s)
+                    pair = await asyncio.wait_for(call(profile, selected_op), self.timeout_s)
+                    pair.generation["attempts"] = attempts + [{
+                        "backend": backend, "attempt": attempt, "status": "success",
+                        "elapsed_s": time.monotonic() - started,
+                    }]
+                    return pair
                 except Exception as exc:
                     errors.append(f"{backend} attempt {attempt}: {type(exc).__name__}: {exc}")
-                    attempts.append({"backend": backend, "attempt": attempt, "error": str(exc),
-                                     "response_text": getattr(exc, "response_text", None)})
+                    attempts.append({"backend": backend, "attempt": attempt,
+                                     "error_type": type(exc).__name__, "error": str(exc),
+                                     "elapsed_s": time.monotonic() - started,
+                                     "response_text": getattr(exc, "response_text", None),
+                                     "response_trace": getattr(exc, "response_trace", None)})
                     last_error = exc
         failure = RuntimeError("Candidate generation failed; " + "; ".join(errors))
         failure.attempts = attempts
@@ -240,6 +250,8 @@ class CrucibleLLMClient:
             return pair
         except ValueError as exc:
             exc.response_text = raw_content
+            exc.response_trace = {"message": choice["message"], "usage": data.get("usage"),
+                                  "finish_reason": choice.get("finish_reason"), "model": data.get("model")}
             raise
 
     def _generate_mock(self, profile: TaskProfile, seed: int, operator: str = "inductive_bias") -> CandidatePair:

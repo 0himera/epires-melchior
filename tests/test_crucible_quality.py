@@ -153,3 +153,19 @@ os._exit(9)
         assert json.loads((tmp_path / 'errors.jsonl').read_text())['seed'] == 7
     finally:
         store.close()
+
+
+@pytest.mark.asyncio
+async def test_session_budget_also_bounds_model_discovery(tmp_path):
+    import asyncio
+    runner = CrucibleRunner(llm_mode='api', output_dir=tmp_path, max_hours=.00005)
+    async def stalled(request):
+        await asyncio.Event().wait()
+    await runner.client._http_client.aclose()
+    runner.client._http_client = httpx.AsyncClient(transport=httpx.MockTransport(stalled))
+    import time
+    started = time.monotonic()
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(runner.run(), 2)
+    assert time.monotonic() - started < 1
+    assert runner.client._http_client.is_closed and runner.http_client.is_closed
