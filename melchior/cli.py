@@ -151,6 +151,31 @@ def main() -> None:
     report_parser.add_argument("task", help="Path to task YAML specification file")
     report_parser.add_argument("--output", "-o", default="artifacts", help="Output directory")
 
+    crucible_parser = subparsers.add_parser(
+        "crucible", help="Run high-throughput execution-grounded self-play generator"
+    )
+    crucible_parser.add_argument(
+        "--concurrency", "-j", type=int, default=20, help="Concurrent async workers (default: 20)"
+    )
+    crucible_parser.add_argument(
+        "--output", "-o", default="data/crucible", help="Output directory for dataset jsonl files"
+    )
+    crucible_parser.add_argument(
+        "--url", default=None, help="vLLM endpoint URL (default: http://localhost:8000/v1 or env CRUCIBLE_LLM_URL)"
+    )
+    crucible_parser.add_argument(
+        "--model", default="qwen", help="Model name on vLLM server (default: qwen)"
+    )
+    crucible_parser.add_argument(
+        "--mode", choices=["auto", "api", "mock"], default="auto", help="Mode: auto | api | mock"
+    )
+    crucible_parser.add_argument(
+        "--pairs", "-n", type=int, default=None, help="Stop after N pairs (default: run until stopped)"
+    )
+    crucible_parser.add_argument(
+        "--timeout", type=float, default=12.0, help="Per-candidate timeout in seconds (default: 12.0)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "run":
@@ -160,6 +185,20 @@ def main() -> None:
         journal = Journal(Path(args.output) / "journal.jsonl")
         generate_report(journal, task, args.output)
         print(f"[✓] Generated report at {args.output}/report.md")
+    elif args.command == "crucible":
+        import asyncio
+        from melchior.crucible.runner import CrucibleRunner
+
+        runner = CrucibleRunner(
+            concurrency=args.concurrency,
+            output_dir=args.output,
+            llm_base_url=args.url,
+            llm_model=args.model,
+            llm_mode=args.mode,
+            sandbox_timeout_s=args.timeout,
+            max_pairs=args.pairs,
+        )
+        asyncio.run(runner.run())
     else:
         parser.print_help()
 

@@ -43,7 +43,24 @@ docker run --rm -v $(pwd)/artifacts:/workspace/artifacts melchior:latest run exa
 docker compose run melchior
 ```
 
-### 3. Артефакты работы
+### 3. Генерация датасета решений (Melchior Crucible)
+
+Для запуска ночного конвейера эмпирического Self-Play на сервере (20 vCPU + локальный vLLM с Qwen 27B):
+
+```bash
+# Запуск 20 асинхронных воркеров с подключением к vLLM:
+melchior crucible \
+  --concurrency 20 \
+  --url http://localhost:8000/v1 \
+  --model qwen \
+  --output data/crucible_dataset
+
+# Результат:
+# data/crucible_dataset/openjev_ml_nli.jsonl  (OpenJev 3-way NLI: 0/1/2)
+# data/crucible_dataset/melchior_dpo_pairs.jsonl (DPO pairs: chosen/rejected)
+```
+
+### 4. Артефакты работы
 По итогам работы агент создаёт:
 - `artifacts/best_solution.py` — автономный воспроизводимый скрипт лучшей модели
 - `artifacts/journal.jsonl` — полный аудит всех попыток с трекингом калибровки
