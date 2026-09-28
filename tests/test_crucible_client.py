@@ -61,6 +61,9 @@ async def test_incomplete_pair_is_retried_and_operator_reaches_http_prompt():
         pair = await client.generate_pair(profile, 42, operator="pathology_defense")
         assert pair.code_b == VALID_PAIR["candidate_b"]["code"]
         assert len(requests) == 2
+        assert requests[0]['response_format']['type'] == 'json_schema'
+        schema = requests[0]['response_format']['json_schema']['schema']
+        assert set(schema['required']) == {'candidate_a', 'candidate_b'}
         assert all(r["messages"][0]["content"] == get_prompt_for_operator("pathology_defense")
                    for r in requests)
     finally:
@@ -87,9 +90,12 @@ async def test_failed_generation_has_bounded_retries_and_never_returns_mock(mode
     await client._http_client.aclose()
     client._http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:
-        with pytest.raises(RuntimeError, match="Candidate generation failed"):
+        with pytest.raises(RuntimeError, match="Candidate generation failed") as failure_info:
             await client.generate_pair(generate_task(42)[0], 42)
         assert calls == 2
+        if failure != 'http_error':
+            assert len(failure_info.value.attempts) == 2
+            assert failure_info.value.attempts[0]['response_text']
     finally:
         await client.close()
 

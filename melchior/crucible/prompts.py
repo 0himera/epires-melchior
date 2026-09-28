@@ -22,10 +22,15 @@ Use only numpy/scipy/scikit-learn/pandas. Do not catch training errors or return
 Budget: 12 seconds, at most 5 parameter settings, cv<=3, trees<=80, max_iter<=200.
 Only pass parameters supported by the estimator:
 HistGradientBoosting uses max_iter, NOT n_estimators or n_jobs.
-LogisticRegression: omit multi_class. MLP and Huber: omit n_jobs; Huber: omit random_state.
+LogisticRegression: omit multi_class; use lbfgs for multiclass, not liblinear. MLP and Huber: omit n_jobs; Huber: omit random_state.
+HistGradientBoosting.fit takes X, y; configure early_stopping in the constructor, not fit.
+SelectFromModel is in sklearn.feature_selection. HuberRegressor epsilon must be >=1.0.
 Use n_jobs=1 only where supported; random_state=42 only for stochastic estimators.
-Output raw JSON with candidate_a and candidate_b, each containing:
-{"hypothesis": "brief rationale for this implementation", "code": "Python module defining fit_predict"}.
+Output raw JSON with candidate_a and candidate_b in this exact structure:
+{
+  "candidate_a": {"hypothesis": "rationale for A", "code": "Python module defining fit_predict"},
+  "candidate_b": {"hypothesis": "rationale for B", "code": "Python module defining fit_predict"}
+}
 Keep code concise. No markdown fences.
 """
 

@@ -1,5 +1,7 @@
 # OpenJev data contract audit (2026-09-29)
 
+Dataset revision: `98ddc2bba16930bc975b711bb3bca269dce4459c`.
+
 Primary sources:
 - https://huggingface.co/datasets/AlexWortega/openjev-data
 - https://huggingface.co/datasets/AlexWortega/openjev-data/blob/main/README.md
@@ -61,3 +63,17 @@ individual inspected scenarios also contain ambiguous or inconsistent wording.
 
 The HF automatic viewer currently fails because it tries to cast composition
 metadata as examples. Load explicit `data_files`, not all repository JSON files.
+
+## Builder validation caveat
+
+Inspected `code/data_mix.py:build_final`: its internal validation split shuffles
+rows and takes the first `n_val`, without grouping scenarios/options/votes.
+Given the repeated decision rows, this allows related examples to cross that
+split. This is a limitation of that internal validation design, not a measured
+claim about every external benchmark. `by_source` is counted before class
+balancing/filtering, so those counts are not the final training frequencies.
+
+`synth_probability` samples binary outcomes with an analytically calculated
+probability. Its labels deliberately encode event frequencies rather than a
+hard certainty judgment. This reinforces why a close empirical comparison
+should not automatically become NLI neutral.

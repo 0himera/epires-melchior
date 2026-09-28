@@ -85,6 +85,8 @@ class CrucibleRunner:
                     record['jev_error'] = f'{type(exc).__name__}: {exc}'
         except Exception as exc:
             record['error'] = f'{type(exc).__name__}: {exc}'
+            if hasattr(exc, 'attempts'):
+                record['generation_attempts'] = exc.attempts
         record['wall_time_s'] = time.monotonic() - started
         return record
 

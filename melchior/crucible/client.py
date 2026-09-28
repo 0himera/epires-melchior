@@ -27,6 +27,17 @@ class CandidatePair:
     operator: str = "inductive_bias"
 
 
+CANDIDATE_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["candidate_a", "candidate_b"],
+    "properties": {name: {
+        "type": "object", "additionalProperties": False,
+        "required": ["hypothesis", "code"],
+        "properties": {field: {"type": "string", "minLength": 1} for field in ("hypothesis", "code")},
+    } for name in ("candidate_a", "candidate_b")},
+}
+
+
 def _parse_candidate_json(raw_text: str, operator: str = "default") -> CandidatePair:
     """Parses raw model output into CandidatePair with fallback extraction."""
     if not isinstance(raw_text, str) or not raw_text.strip():
@@ -126,6 +137,7 @@ class CrucibleLLMClient:
         if self.mode == "auto" and find_opencode_bin():
             backends.append("opencode")
         errors = []
+        attempts = []
         for backend in backends:
             for attempt in range(1, self.max_attempts + 1):
                 try:
@@ -133,8 +145,12 @@ class CrucibleLLMClient:
                     return await asyncio.wait_for(call(profile, selected_op), self.timeout_s)
                 except Exception as exc:
                     errors.append(f"{backend} attempt {attempt}: {type(exc).__name__}: {exc}")
+                    attempts.append({"backend": backend, "attempt": attempt, "error": str(exc),
+                                     "response_text": getattr(exc, "response_text", None)})
                     last_error = exc
-        raise RuntimeError("Candidate generation failed; " + "; ".join(errors)) from last_error
+        failure = RuntimeError("Candidate generation failed; " + "; ".join(errors))
+        failure.attempts = attempts
+        raise failure from last_error
 
     async def _call_opencode(
         self, profile: TaskProfile, operator: str = "inductive_bias"
@@ -198,7 +214,8 @@ class CrucibleLLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "response_format": {"type": "json_object"},
+            "response_format": {"type": "json_schema", "json_schema": {
+                "name": "candidate_pair", "strict": True, "schema": CANDIDATE_SCHEMA}},
             "temperature": 0.7,
             "max_tokens": 4096,
         }
@@ -212,10 +229,14 @@ class CrucibleLLMClient:
         data = resp.json()
 
         choice = data["choices"][0]
-        if choice.get("finish_reason") == "length":
-            raise ValueError("LLM response was truncated by the token limit")
         raw_content = choice["message"]["content"]
-        return _parse_candidate_json(raw_content, operator=operator)
+        try:
+            if choice.get("finish_reason") == "length":
+                raise ValueError("LLM response was truncated by the token limit")
+            return _parse_candidate_json(raw_content, operator=operator)
+        except ValueError as exc:
+            exc.response_text = raw_content
+            raise
 
     def _generate_mock(self, profile: TaskProfile, seed: int, operator: str = "inductive_bias") -> CandidatePair:
         """Deterministic executable fixtures; mock output is never a research result."""
