@@ -114,6 +114,8 @@ class CrucibleLLMClient:
 
     async def _call_opencode(self, profile: TaskProfile) -> CandidatePair:
         """Generates candidate pair via OpenCode CLI."""
+        from melchior.config import find_opencode_bin
+
         user_prompt = (
             f"Task: {profile.description}\n"
             f"Type: {profile.task_type}\n"
@@ -123,7 +125,7 @@ class CrucibleLLMClient:
             f"Output strictly raw JSON with keys 'candidate_a' and 'candidate_b', without markdown fences."
         )
         full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
-        opencode_bin = shutil.which("opencode") or "/home/himera/.bun/bin/opencode"
+        opencode_bin = find_opencode_bin() or "opencode"
 
         cmd = [opencode_bin, "run", "--pure", "--format", "json"]
         if self.model and self.model not in ["qwen", "auto", "default", "mock"]:

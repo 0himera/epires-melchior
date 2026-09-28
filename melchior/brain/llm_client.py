@@ -327,11 +327,11 @@ print(json.dumps({"metric": r2, "scores": scores.tolist()}))
         n_candidates: int,
     ) -> list[CandidateProposal]:
         """Generates candidates by invoking OpenCode CLI."""
-        import shutil
         import subprocess
         import re
+        from melchior.config import find_opencode_bin
 
-        opencode_bin = shutil.which("opencode") or "/home/himera/.bun/bin/opencode"
+        opencode_bin = find_opencode_bin() or "opencode"
         prompt = (
             "You are Melchior System Two. Write self-contained Python scripts for ML tasks.\n"
             "Each script must train on the dataset, evaluate with cross-validation or validation set,\n"

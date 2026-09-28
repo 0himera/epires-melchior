@@ -5,12 +5,30 @@ import os
 from pydantic import BaseModel, Field
 
 
+from pathlib import Path
+
+
+def find_opencode_bin() -> str | None:
+    """Dynamically locates opencode binary in PATH or user home directories without hardcoding."""
+    found = shutil.which("opencode")
+    if found:
+        return found
+    for candidate in [
+        Path.home() / ".bun" / "bin" / "opencode",
+        Path.home() / ".local" / "bin" / "opencode",
+        Path.home() / ".cargo" / "bin" / "opencode",
+    ]:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
 def _default_llm_mode() -> str:
     if os.getenv("MELCHIOR_LLM_MODE"):
         return os.getenv("MELCHIOR_LLM_MODE")
     if os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"):
         return "api"
-    if shutil.which("opencode"):
+    if find_opencode_bin():
         return "opencode"
     return "mock"
 
