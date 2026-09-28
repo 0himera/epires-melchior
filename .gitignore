@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# Build artifacts and package distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Melchior runtime artifacts and logs
+artifacts/
+artifacts_*/
+journal.jsonl
+*.log
+
+# Environment variables
+.env
+.env.*
+!.env.example

@@ -1,0 +1,11 @@
+name: "tabular_regression"
+goal: "Discover optimal regression model maximizing R2 score on noisy synthetic continuous data."
+domain: "tabular_regression"
+metric: "val_r2"
+direction: "maximize"
+target_metric: 0.90
+budget:
+  max_trials: 3
+  max_hours: 0.1
+  pilot_timeout_s: 15
+  trial_timeout_s: 45

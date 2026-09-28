@@ -1,0 +1,17 @@
+services:
+  melchior:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: melchior:latest
+    container_name: melchior_agent
+    volumes:
+      - ./artifacts:/workspace/artifacts
+      - ./examples:/workspace/examples:ro
+    environment:
+      - JEV_API_KEY=${JEV_API_KEY:-}
+      - MELCHIOR_JEV_MODE=${MELCHIOR_JEV_MODE:-mock}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MELCHIOR_LLM_MODE=${MELCHIOR_LLM_MODE:-mock}
+      - MELCHIOR_LLM_MODEL=${MELCHIOR_LLM_MODEL:-gpt-4o}
+    command: ["run", "examples/iris_classification.yaml", "--output", "artifacts"]

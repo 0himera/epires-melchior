@@ -1,0 +1,11 @@
+name: "iris_classification"
+goal: "Train an accurate and robust multiclass classifier on Iris dataset with cross-validation."
+domain: "tabular_classification"
+metric: "val_accuracy"
+direction: "maximize"
+target_metric: 0.97
+budget:
+  max_trials: 4
+  max_hours: 0.2
+  pilot_timeout_s: 15
+  trial_timeout_s: 60
