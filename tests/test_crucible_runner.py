@@ -18,7 +18,7 @@ async def test_all_generation_failures_are_logged_and_respect_pair_limit(tmp_pat
     monkeypatch.setattr(runner.client, "generate_pair", fail)
     await asyncio.wait_for(runner.run(), 5)
     assert sorted(seeds) == [1000, 1001, 1002]
-    errors = [json.loads(line) for line in runner.errors_file.read_text().splitlines()]
+    errors = [json.loads(line) for line in (tmp_path / "errors.jsonl").read_text().splitlines()]
     assert {e["seed"] for e in errors} == set(seeds)
     assert all("candidate_b" in e["error"] for e in errors)
     assert runner._total_evaluated == 0

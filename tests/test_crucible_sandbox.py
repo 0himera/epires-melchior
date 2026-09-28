@@ -18,36 +18,54 @@ def data():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("code", "status", "metric"), [
-    ("print('METRIC:-1.2e-3')", "success", -0.0012),
-    ("print('METRIC:0.0')", "success", 0.0),
-    ("print('METRIC:0.9'); raise ValueError('bad model')", "failed", None),
-    ("print('training complete')", "failed", None),
-    ("print('METRIC:nan')", "failed", None),
-    ("print('METRIC:inf')", "failed", None),
-    ("print('METRIC:0.9oops')", "failed", None),
-    ("print('METRIC:0.8'); print('METRIC:0.9')", "failed", None),
+@pytest.mark.parametrize(("body", "status", "metric"), [
+    ("return np.zeros(len(X_test))", "success", 1.0),
+    ("print('METRIC:999'); return np.zeros(len(X_test))", "success", 1.0),
+    ("raise ValueError('bad model')", "failed", None),
+    ("return np.array([float('nan')]*len(X_test))", "failed", None),
+    ("return np.zeros((len(X_test), 2))", "failed", None),
+    ("return np.zeros(len(X_test)+1)", "failed", None),
+    ("return np.full(len(X_test), 777)", "failed", None),
 ])
-async def test_sandbox_validates_the_actual_process_output(data, code, status, metric):
+async def test_sandbox_scores_predictions_in_parent(data, body, status, metric):
+    code = "import numpy as np\ndef fit_predict(X_train, y_train, X_test):\n    " + body
     result = await AsyncSandbox(timeout_s=5).execute(code, *data)
     assert result.status == status
     assert result.metric == metric
 
 
 @pytest.mark.asyncio
+async def test_no_test_labels_in_child(data):
+    code = """import numpy as np
+def fit_predict(X_train, y_train, X_test):
+    data = np.load('data.npz')
+    assert set(data.files) == {'X_train', 'y_train', 'X_test'}
+    return np.zeros(len(X_test))
+"""
+    result = await AsyncSandbox(timeout_s=5).execute(code, *data)
+    assert result.status == 'success'
+
+
+@pytest.mark.asyncio
+async def test_printed_metric_without_predictions_is_rejected(data):
+    result = await AsyncSandbox().execute("print('METRIC:1')", *data)
+    assert result.status == 'failed'
+
+
+@pytest.mark.asyncio
 async def test_stderr_larger_than_pipe_buffer_does_not_deadlock(data):
     result = await AsyncSandbox(timeout_s=5).execute(
-        "import sys\nsys.stderr.write('x' * 200000)\nprint('METRIC:0.75')", *data,
+        "import sys, numpy as np\ndef fit_predict(X_train, y_train, X_test):\n    sys.stderr.write('x' * 200000)\n    return np.zeros(len(X_test))", *data,
     )
     assert result.status == "success"
-    assert result.metric == 0.75
-    assert len(result.stderr) == 200000
+    assert result.metric == 1
+    assert len(result.stderr) == 16000
 
 
 @pytest.mark.asyncio
 async def test_silent_process_times_out_and_temp_files_are_removed(data, tmp_path, monkeypatch):
     monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
-    result = await AsyncSandbox(timeout_s=0.2).execute("import time; time.sleep(60)", *data)
+    result = await AsyncSandbox(timeout_s=0.2).execute("def fit_predict(a,b,c):\n    import time; time.sleep(60)", *data)
     assert result.status == "timeout"
     assert result.wall_time_s < 3
     assert result.metric is None
@@ -81,7 +99,7 @@ def test_asyncio_shutdown_reaps_children_without_hanging(tmp_path, scenario):
             await asyncio.sleep(0)
             raise RuntimeError("missing candidate_b")
         async def main():
-            calls = [AsyncSandbox(timeout_s=60).execute('import time; time.sleep(60)', *data)
+            calls = [AsyncSandbox(timeout_s=60).execute('def fit_predict(a,b,c): import time; time.sleep(60)', *data)
                      for _ in range(8)]
             if scenario == 'error_during_parallel_spawn':
                 calls.append(fail())

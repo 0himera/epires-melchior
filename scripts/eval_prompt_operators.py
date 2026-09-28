@@ -74,7 +74,7 @@ async def evaluate_operator(
     deltas = []
 
     for seed in seeds:
-        profile, X_tr, y_tr, X_va, y_va = generate_task(seed)
+        profile, X_tr, y_tr, X_va, y_va = generate_task(seed, split="eval")
         print(f"  [Task #{seed}] {profile.description} ({profile.task_type}, metric: {profile.metric})")
 
         t0 = time.time()
@@ -84,6 +84,7 @@ async def evaluate_operator(
             print(f"    -> Generated in {gen_time:.1f}s")
         except Exception as e:
             print(f"    [!] Generation failed: {e}")
+            results.append({"seed": seed, "error": f"{type(e).__name__}: {e}", "patterns": []})
             continue
 
         total_candidates += 2
@@ -91,8 +92,8 @@ async def evaluate_operator(
         # Dual sandbox execution
         t_exec = time.time()
         res_a, res_b = await asyncio.gather(
-            sandbox.execute(pair.code_a, X_tr, y_tr, X_va, y_va),
-            sandbox.execute(pair.code_b, X_tr, y_tr, X_va, y_va),
+            sandbox.execute(pair.code_a, X_tr, y_tr, X_va, y_va, metric=profile.metric),
+            sandbox.execute(pair.code_b, X_tr, y_tr, X_va, y_va, metric=profile.metric),
         )
         exec_time = time.time() - t_exec
 
@@ -107,11 +108,12 @@ async def evaluate_operator(
         status_b = f"{res_b.metric:.4f}" if succ_b else f"FAIL ({res_b.status})"
         print(f"    -> Cand A: {status_a} | Cand B: {status_b} (Sandbox: {exec_time:.2f}s)")
 
-        outcome = arbiter.evaluate(profile, pair, res_a, res_b)
-        deltas.append(outcome.delta)
+        outcome = await asyncio.to_thread(arbiter.evaluate, profile, pair, res_a, res_b, y_true=y_va, seed=seed)
+        if outcome.delta is not None:
+            deltas.append(outcome.delta)
         patterns = analyze_code_patterns(operator, pair.code_a, pair.code_b)
 
-        print(f"    -> Arbiter: Winner={outcome.winner} (Δ={outcome.delta:.4f}) | Patterns: {', '.join(patterns) if patterns else 'standard'}")
+        print(f"    -> Arbiter: Winner={outcome.winner} (Δ={outcome.delta}) | Patterns: {', '.join(patterns) if patterns else 'standard'}")
 
         results.append({
             "seed": seed,
@@ -123,6 +125,7 @@ async def evaluate_operator(
             "res_a": asdict(res_a),
             "res_b": asdict(res_b),
             "winner": outcome.winner,
+            "interval": outcome.interval,
             "delta": outcome.delta,
             "patterns": patterns,
         })
@@ -133,6 +136,7 @@ async def evaluate_operator(
     return {
         "operator": operator,
         "total_tasks": len(seeds),
+        "generation_failures": sum("error" in r for r in results),
         "total_candidates": total_candidates,
         "successful_candidates": successful_candidates,
         "pass_rate_pct": pass_rate,
@@ -172,7 +176,7 @@ async def main():
 
     try:
         for idx, op in enumerate(OPERATOR_KEYS):
-            seeds = [base_seed + idx * 10 + i for i in range(args.tasks_per_op)]
+            seeds = [base_seed + i for i in range(args.tasks_per_op)]
             summary = await evaluate_operator(op, seeds, client, sandbox, arbiter)
             operator_summaries.append(summary)
     finally:

@@ -1,158 +1,167 @@
-"""Crucible high-throughput async runner for 20-32 concurrent workers."""
-
+"""Resumable paired experiments with bounded concurrency and trusted scoring."""
 from __future__ import annotations
-
 import asyncio
-import json
-import time
+from collections import Counter
+from dataclasses import asdict
+import hashlib
+import math
 from pathlib import Path
+import time
+import httpx
+
 from melchior.crucible.environments import generate_task
-from melchior.crucible.client import CrucibleLLMClient
+from melchior.crucible.client import CrucibleLLMClient, CandidatePair
 from melchior.crucible.sandbox import AsyncSandbox
 from melchior.crucible.arbiter import CrucibleArbiter
+from melchior.crucible.decisions import comparison
+from melchior.crucible.metrics import CONTRACT_VERSION
+from melchior.crucible.storage import RunStore, fingerprint, atomic_json
+
+
+def parse_answer(data):
+    ans = data['answers']['winner']
+    choice, confidence = ans['choice'], float(ans['confidence'])
+    if choice not in {'A', 'B'} or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+        raise ValueError('Invalid OpenJev choice or confidence')
+    return {'choice': choice, 'confidence': confidence}
 
 
 class CrucibleRunner:
-    def __init__(
-        self,
-        concurrency: int = 20,
-        output_dir: str | Path = "data/crucible",
-        llm_base_url: str | None = None,
-        llm_model: str = "qwen",
-        llm_mode: str = "auto",
-        sandbox_timeout_s: float = 12.0,
-        max_pairs: int | None = None,
-    ):
-        if concurrency < 1 or (max_pairs is not None and max_pairs < 0):
-            raise ValueError("concurrency must be positive and max_pairs non-negative")
-        self.concurrency = concurrency
+    def __init__(self, concurrency=20, output_dir='data/crucible', llm_base_url=None,
+                 llm_model='qwen', llm_mode='auto', sandbox_timeout_s=12., max_pairs=None,
+                 *, split='train', seed_start=1000, resume=False, max_hours=None,
+                 min_delta=0.005, jev_url=None):
+        if concurrency < 1 or (max_pairs is not None and max_pairs < 0) or seed_start < 0:
+            raise ValueError('Invalid concurrency, pair budget or starting seed')
+        if split not in {'train', 'eval'} or (max_hours is not None and max_hours <= 0):
+            raise ValueError('Invalid split or time budget')
+        self.concurrency, self.max_pairs = concurrency, max_pairs
         self.output_dir = Path(output_dir)
-        self.llm_base_url = llm_base_url
-        self.llm_model = llm_model
-        self.llm_mode = llm_mode
-        self.sandbox_timeout_s = sandbox_timeout_s
-        self.max_pairs = max_pairs
-
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.nli_file = self.output_dir / "openjev_ml_nli.jsonl"
-        self.dpo_file = self.output_dir / "melchior_dpo_pairs.jsonl"
-        self.errors_file = self.output_dir / "crucible_errors.jsonl"
-
-        self.arbiter = CrucibleArbiter(min_delta=0.005)
-        self.sandbox = AsyncSandbox(timeout_s=self.sandbox_timeout_s)
-        self.client = CrucibleLLMClient(
-            base_url=self.llm_base_url,
-            model=self.llm_model,
-            mode=self.llm_mode,
-        )
-
-        self._lock = asyncio.Lock()
+        self.split, self.seed_start, self.resume, self.max_hours = split, seed_start, resume, max_hours
+        self.llm_mode, self.jev_url = llm_mode, jev_url
+        self.sandbox = AsyncSandbox(timeout_s=sandbox_timeout_s)
+        self.arbiter = CrucibleArbiter(min_delta)
+        self.client = CrucibleLLMClient(base_url=llm_base_url, model=llm_model, mode=llm_mode, timeout_s=60.)
+        self.http_client = httpx.AsyncClient(timeout=20.)
+        self.manifest = {'schema': CONTRACT_VERSION, 'split': split, 'seed_start': seed_start,
+                         'llm_url': self.client.base_url, 'llm_model': llm_model, 'mode': llm_mode,
+                         'sandbox_timeout_s': sandbox_timeout_s, 'min_delta': min_delta,
+                         'jev_url': jev_url, **fingerprint()}
         self._total_evaluated = 0
-        self._nli_rows_written = 0
-        self._dpo_rows_written = 0
-        self._start_time = 0.0
 
-    async def _worker(self, worker_id: int, queue: asyncio.Queue[int | None]):
-        """Individual worker loop processing tasks."""
-        while True:
-            seed = await queue.get()
-            if seed is None:
-                queue.task_done()
-                break
+    async def _query_openjev(self, profile, pair, *, swapped=False):
+        response = await self.http_client.post(self.jev_url, json=comparison(profile, pair, swapped=swapped))
+        response.raise_for_status()
+        return parse_answer(response.json())
 
-            try:
-                # 1. Generate empirical task and data split
-                profile, X_tr, y_tr, X_va, y_va = generate_task(seed)
+    async def _process_task(self, seed):
+        record = {'schema': CONTRACT_VERSION, 'seed': seed, 'mode': self.llm_mode}
+        started = time.monotonic()
+        try:
+            profile, X_train, y_train, X_test, y_test = generate_task(seed, split=self.split)
+            record['profile'] = asdict(profile)
+            pair = await self.client.generate_pair(profile, seed)
+            # Avoid a fixed association of algorithm family with displayed A/B.
+            swapped = bool(hashlib.sha256(f'{self.split}:{seed}:order'.encode()).digest()[0] & 1)
+            if swapped:
+                pair = CandidatePair(pair.hypothesis_b, pair.code_b, pair.hypothesis_a, pair.code_a, pair.operator)
+            record.update(pair=asdict(pair), generation_swapped=swapped, resolved_model=self.client.model)
+            # TaskGroup cancels and drains the sibling if an execution raises unexpectedly.
+            async with asyncio.TaskGroup() as group:
+                a = group.create_task(self.sandbox.execute(pair.code_a, X_train, y_train, X_test, y_test, metric=profile.metric))
+                b = group.create_task(self.sandbox.execute(pair.code_b, X_train, y_train, X_test, y_test, metric=profile.metric))
+            ra, rb = a.result(), b.result()
+            record.update(res_a=asdict(ra), res_b=asdict(rb), test_labels=y_test.tolist())
+            outcome = await asyncio.to_thread(self.arbiter.evaluate, profile, pair, ra, rb, y_true=y_test, seed=seed)
+            record['outcome'] = asdict(outcome)
+            if self.jev_url and outcome.winner in {'A', 'B'}:
+                try:
+                    normal = await self._query_openjev(profile, pair)
+                    reverse = await self._query_openjev(profile, pair, swapped=True)
+                    record['jev'] = {'normal': normal, 'swapped': reverse,
+                                     'correct': normal['choice'] == outcome.winner,
+                                     'swap_consistent': normal['choice'] != reverse['choice']}
+                except Exception as exc:
+                    record['jev_error'] = f'{type(exc).__name__}: {exc}'
+        except Exception as exc:
+            record['error'] = f'{type(exc).__name__}: {exc}'
+        record['wall_time_s'] = time.monotonic() - started
+        return record
 
-                # 2. Get competing candidates from LLM
-                pair = await self.client.generate_pair(profile, seed)
-
-                # 3. Execute both candidates in parallel in isolated sandboxes
-                res_a, res_b = await asyncio.gather(
-                    self.sandbox.execute(pair.code_a, X_tr, y_tr, X_va, y_va),
-                    self.sandbox.execute(pair.code_b, X_tr, y_tr, X_va, y_va),
-                )
-
-                # 4. Objective empirical judgment
-                outcome = self.arbiter.evaluate(profile, pair, res_a, res_b)
-
-                # 5. Thread-safe write to dataset files
-                async with self._lock:
-                    self._total_evaluated += 1
-
-                    if outcome.nli_records:
-                        with open(self.nli_file, "a", encoding="utf-8") as f:
-                            for row in outcome.nli_records:
-                                f.write(json.dumps(row, ensure_ascii=False) + "\n")
-                                self._nli_rows_written += 1
-
-                    if outcome.dpo_record:
-                        with open(self.dpo_file, "a", encoding="utf-8") as f:
-                            f.write(json.dumps(outcome.dpo_record, ensure_ascii=False) + "\n")
-                            self._dpo_rows_written += 1
-
-                    # Log progress every 5 evaluations
-                    if self._total_evaluated % 5 == 0 or self._total_evaluated == 1:
-                        elapsed = time.time() - self._start_time
-                        rate = (self._total_evaluated / elapsed) * 60.0 if elapsed > 0 else 0.0
-                        winner_label = f"Winner: {outcome.winner} (Δ={outcome.delta:.3f})"
-                        print(
-                            f"[{self._total_evaluated:05d} pairs] "
-                            f"{rate:5.1f} pairs/min | "
-                            f"NLI rows: {self._nli_rows_written} | "
-                            f"DPO rows: {self._dpo_rows_written} | "
-                            f"Last: {winner_label}"
-                        )
-
-            except Exception as e:
-                error = {"seed": seed, "error_type": type(e).__name__, "error": str(e)}
-                with self.errors_file.open("a", encoding="utf-8") as file:
-                    file.write(json.dumps(error, ensure_ascii=False) + "\n")
-                print(f"[!] Task {seed}: {type(e).__name__}: {e}", flush=True)
-            finally:
-                queue.task_done()
+    def _summary(self, store, status):
+        records = store.records()
+        evaluated = [r for r in records if 'outcome' in r]
+        decisive = [r for r in evaluated if r['outcome']['winner'] in {'A', 'B'}]
+        jev = [r['jev'] for r in decisive if 'jev' in r]
+        success = sum(r[k]['status'] == 'success' for r in evaluated for k in ('res_a', 'res_b'))
+        summary = {'status': status, 'split': self.split, 'mock': self.llm_mode == 'mock',
+                   'attempts': len(records), 'evaluated': len(evaluated),
+                   'generation_or_pipeline_errors': len(records)-len(evaluated),
+                   'successful_candidates': success, 'total_candidates': 2*len(evaluated),
+                   'decisive_quality_pairs': len(decisive),
+                   'outcomes': dict(Counter(r['outcome']['winner'] for r in evaluated)),
+                   'operators': dict(Counter(r['pair']['operator'] for r in evaluated)),
+                   'jev_scored': len(jev), 'jev_errors': sum('jev_error' in r for r in decisive),
+                   'jev_correct': sum(j['correct'] for j in jev),
+                   'jev_swap_consistent': sum(j['swap_consistent'] for j in jev),
+                   'session_elapsed_s': time.monotonic()-self._start_time}
+        atomic_json(self.output_dir / 'summary.json', summary)
+        return summary
 
     async def run(self):
-        """Starts the async generation crucible."""
-        self._start_time = time.time()
-        print(f"[*] Melchior Crucible initialized with {self.concurrency} async workers")
-        print(f"[*] Output directory: {self.output_dir.resolve()}")
-        print(f"[*] Target NLI file:  {self.nli_file.name}")
-        print(f"[*] Target DPO file:  {self.dpo_file.name}")
-        print(f"[*] LLM backend:      {self.llm_base_url or 'mock/synthetic'} (model: {self.llm_model})")
-        print("[*] Starting self-play feedback loop...\n")
-
-        queue: asyncio.Queue[int | None] = asyncio.Queue(maxsize=self.concurrency * 2)
-
-        # Launch workers
-        workers = [
-            asyncio.create_task(self._worker(i, queue))
-            for i in range(self.concurrency)
-        ]
-
-        # Producer feed
-        seed = 1000
+        self._start_time = time.monotonic()
+        store, workers = None, []
+        status = 'failed'
         try:
-            # Bound submitted attempts, including failures. Counting only completed
-            # successes overshoots the limit and runs forever when the API is down.
-            while self.max_pairs is None or seed - 1000 < self.max_pairs:
-                await queue.put(seed)
-                seed += 1
-
-            # Signal termination
-            for _ in range(self.concurrency):
-                await queue.put(None)
-
-            await asyncio.gather(*workers)
-
+            if self.llm_mode != 'mock':
+                self.manifest['resolved_model'] = await self.client._resolve_model()
+            store = RunStore(self.output_dir, self.manifest, resume=self.resume)
+            done = store.completed()
+            store.export()
+            next_seed = self.seed_start
+            deadline = self._start_time + self.max_hours*3600 if self.max_hours is not None else math.inf
+            async def worker():
+                nonlocal next_seed
+                while time.monotonic() < deadline:
+                    while next_seed in done:
+                        next_seed += 1
+                    if self.max_pairs is not None and next_seed >= self.seed_start+self.max_pairs:
+                        return
+                    seed = next_seed
+                    next_seed += 1
+                    record = await self._process_task(seed)
+                    store.save(record)
+                    done.add(seed)
+                    self._total_evaluated += 'outcome' in record
+                    if len(done) % 10 == 0 or len(done) == 1:
+                        summary = self._summary(store, 'running')
+                        store.export()
+                        print(f"[{len(done)} attempts] valid candidates {summary['successful_candidates']}/{summary['total_candidates']}; decisive {summary['decisive_quality_pairs']}", flush=True)
+            workers = [asyncio.create_task(worker()) for _ in range(self.concurrency)]
+            try:
+                if self.max_hours is None:
+                    await asyncio.gather(*workers)
+                else:
+                    async with asyncio.timeout(max(0., deadline-time.monotonic())):
+                        await asyncio.gather(*workers)
+                status = 'complete'
+            except TimeoutError:
+                status = 'time_limit'
+        except asyncio.CancelledError:
+            status = 'cancelled'
+            raise
         finally:
             for worker in workers:
                 if not worker.done():
                     worker.cancel()
             await asyncio.gather(*workers, return_exceptions=True)
             await self.client.close()
-            elapsed = time.time() - self._start_time
-            print(f"\n[✓] Crucible finished in {elapsed:.1f}s.")
-            print(f"[✓] Total empirical evaluations: {self._total_evaluated}")
-            print(f"[✓] Generated NLI rows:          {self._nli_rows_written} -> {self.nli_file}")
-            print(f"[✓] Generated DPO pairs:         {self._dpo_rows_written} -> {self.dpo_file}")
+            await self.http_client.aclose()
+            if store:
+                try:
+                    store.export()
+                    summary = self._summary(store, status)
+                    print(summary, flush=True)
+                finally:
+                    store.close()
+        return summary

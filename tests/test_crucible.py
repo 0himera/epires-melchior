@@ -34,13 +34,9 @@ async def test_async_sandbox():
     y_va = np.array([0, 1])
 
     code = """
-import numpy as np
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import accuracy_score
-data = np.load("data.npz")
-model = DecisionTreeClassifier(max_depth=1, random_state=42).fit(data['X_tr'], data['y_tr'])
-score = accuracy_score(data['y_va'], model.predict(data['X_va']))
-print(f"METRIC:{score}")
+def fit_predict(X_train, y_train, X_test):
+    return DecisionTreeClassifier(max_depth=1, random_state=42).fit(X_train, y_train).predict(X_test)
 """
     res = await sandbox.execute(code, X_tr, y_tr, X_va, y_va)
     assert res.status == "success"
@@ -54,43 +50,11 @@ async def test_crucible_llm_client_mock():
     profile, _, _, _, _ = generate_task(seed=100)
     pair = await client.generate_pair(profile, seed=100)
 
-    assert "import numpy as np" in pair.code_a
-    assert "import numpy as np" in pair.code_b
+    assert "def fit_predict" in pair.code_a
+    assert "def fit_predict" in pair.code_b
     assert len(pair.hypothesis_a) > 5
     assert len(pair.hypothesis_b) > 5
     await client.close()
-
-
-def test_arbiter_winner_and_nli_format():
-    arbiter = CrucibleArbiter(min_delta=0.01)
-    profile, _, _, _, _ = generate_task(seed=1)
-    pair = CandidatePair(
-        hypothesis_a="Model A",
-        code_a="code a",
-        hypothesis_b="Model B",
-        code_b="code b",
-    )
-
-    from melchior.crucible.sandbox import SandboxResult
-
-    res_a = SandboxResult(status="success", metric=0.82, wall_time_s=1.0, stdout="", stderr="")
-    res_b = SandboxResult(status="success", metric=0.91, wall_time_s=1.2, stdout="", stderr="")
-
-    outcome = arbiter.evaluate(profile, pair, res_a, res_b)
-    assert outcome.winner == "B"
-    assert outcome.delta == pytest.approx(0.09)
-    assert len(outcome.nli_records) == 2
-
-    # B won: Entailment (1)
-    b_rec = [r for r in outcome.nli_records if r["hypothesis"] == "Model B"][0]
-    assert b_rec["label"] == 1
-
-    # A lost: Contradiction (0)
-    a_rec = [r for r in outcome.nli_records if r["hypothesis"] == "Model A"][0]
-    assert a_rec["label"] == 0
-
-    assert outcome.dpo_record is not None
-    assert "Model B" in outcome.dpo_record["chosen"]
 
 
 @pytest.mark.asyncio
@@ -115,12 +79,7 @@ async def test_crucible_runner_end_to_end(tmp_path):
     with open(nli_file, "r", encoding="utf-8") as f:
         lines = [json.loads(line) for line in f if line.strip()]
 
-    assert 3 <= len(lines) <= 6
-    assert {row['metadata']['task_id'] for row in lines} == {
-        'crucible_task_001000', 'crucible_task_001001', 'crucible_task_001002',
-    }
-    for row in lines:
-        assert "premise" in row
-        assert "hypothesis" in row
-        assert row["label"] in [0, 1, 2]
-        assert row["source"] == "crucible_ml_empirical"
+    assert lines == []  # Mock fixtures must never enter training exports.
+    records = [json.loads(x) for x in (out_dir / 'evaluations.jsonl').read_text().splitlines()]
+    assert {r['seed'] for r in records} == {1000, 1001, 1002}
+    assert all('predictions' in r['res_a'] for r in records)

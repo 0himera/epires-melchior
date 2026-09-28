@@ -200,7 +200,7 @@ class CrucibleLLMClient:
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0.7,
-            "max_tokens": 2048,
+            "max_tokens": 4096,
         }
 
         resp = await self._http_client.post(
@@ -218,133 +218,23 @@ class CrucibleLLMClient:
         return _parse_candidate_json(raw_content, operator=operator)
 
     def _generate_mock(self, profile: TaskProfile, seed: int, operator: str = "inductive_bias") -> CandidatePair:
-        """High-variety offline code synthesizer for testing and local generation."""
-        rng = random.Random(seed)
-
-        if profile.task_type in ["binary_classification", "multiclass_classification"]:
-            models = [
-                (
-                    "StandardScaler + LogisticRegression (regularized)",
-                    """import numpy as np
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import {metric_func}
-
-data = np.load("data.npz")
-X_tr, y_tr, X_va, y_va = data["X_tr"], data["y_tr"], data["X_va"], data["y_va"]
-
-scaler = StandardScaler()
-X_tr_s = scaler.fit_transform(X_tr)
-X_va_s = scaler.transform(X_va)
-
-clf = LogisticRegression(C=0.8, max_iter=250, random_state=42)
-clf.fit(X_tr_s, y_tr)
-preds = clf.predict_proba(X_va_s)[:, 1] if "{metric}" in ["roc_auc"] else clf.predict(X_va_s)
-score = {metric_eval}
-print(f"METRIC:{{score:.4f}}")
-""",
-                ),
-                (
-                    "RandomForestClassifier (n_estimators=100, max_features='sqrt')",
-                    """import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import {metric_func}
-
-data = np.load("data.npz")
-X_tr, y_tr, X_va, y_va = data["X_tr"], data["y_tr"], data["X_va"], data["y_va"]
-
-clf = RandomForestClassifier(n_estimators=100, max_depth=8, max_features="sqrt", random_state=42)
-clf.fit(X_tr, y_tr)
-preds = clf.predict_proba(X_va)[:, 1] if "{metric}" in ["roc_auc"] else clf.predict(X_va)
-score = {metric_eval}
-print(f"METRIC:{{score:.4f}}")
-""",
-                ),
-                (
-                    "HistGradientBoostingClassifier + Early Stopping",
-                    """import numpy as np
-from sklearn.ensemble import HistGradientBoostingClassifier
-from sklearn.metrics import {metric_func}
-
-data = np.load("data.npz")
-X_tr, y_tr, X_va, y_va = data["X_tr"], data["y_tr"], data["X_va"], data["y_va"]
-
-clf = HistGradientBoostingClassifier(max_iter=100, learning_rate=0.08, random_state=42)
-clf.fit(X_tr, y_tr)
-preds = clf.predict_proba(X_va)[:, 1] if "{metric}" in ["roc_auc"] else clf.predict(X_va)
-score = {metric_eval}
-print(f"METRIC:{{score:.4f}}")
-""",
-                ),
-            ]
-
-            if profile.metric == "roc_auc":
-                metric_func = "roc_auc_score"
-                metric_eval = "roc_auc_score(y_va, preds)"
-            elif profile.metric == "f1":
-                metric_func = "f1_score"
-                metric_eval = "f1_score(y_va, preds, average='weighted')"
-            else:
-                metric_func = "accuracy_score"
-                metric_eval = "accuracy_score(y_va, preds)"
-
-        else:
-            models = [
-                (
-                    "StandardScaler + Ridge Regression",
-                    """import numpy as np
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import Ridge
-from sklearn.metrics import r2_score
-
-data = np.load("data.npz")
-X_tr, y_tr, X_va, y_va = data["X_tr"], data["y_tr"], data["X_va"], data["y_va"]
-
-scaler = StandardScaler()
-X_tr_s = scaler.fit_transform(X_tr)
-X_va_s = scaler.transform(X_va)
-
-model = Ridge(alpha=1.5)
-model.fit(X_tr_s, y_tr)
-preds = model.predict(X_va_s)
-score = r2_score(y_va, preds)
-print(f"METRIC:{{score:.4f}}")
-""",
-                ),
-                (
-                    "HistGradientBoostingRegressor with L2 Regularization",
-                    """import numpy as np
-from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.metrics import r2_score
-
-data = np.load("data.npz")
-X_tr, y_tr, X_va, y_va = data["X_tr"], data["y_tr"], data["X_va"], data["y_va"]
-
-model = HistGradientBoostingRegressor(max_iter=120, learning_rate=0.06, l2_regularization=0.5, random_state=42)
-model.fit(X_tr, y_tr)
-preds = model.predict(X_va)
-score = r2_score(y_va, preds)
-print(f"METRIC:{{score:.4f}}")
-""",
-                ),
-            ]
-            metric_func = "r2_score"
-            metric_eval = "r2_score(y_va, preds)"
-
-        chosen = rng.sample(models, 2)
-        cand_a_name, cand_a_tmpl = chosen[0]
-        cand_b_name, cand_b_tmpl = chosen[1]
-
-        code_a = cand_a_tmpl.format(metric_func=metric_func, metric=profile.metric, metric_eval=metric_eval)
-        code_b = cand_b_tmpl.format(metric_func=metric_func, metric=profile.metric, metric_eval=metric_eval)
-
-        return CandidatePair(
-            hypothesis_a=f"Using {cand_a_name} will maximize {profile.metric} on {profile.task_type}.",
-            code_a=code_a,
-            hypothesis_b=f"Using {cand_b_name} will provide better generalization for {profile.metric}.",
-            code_b=code_b,
-            operator=operator,
-        )
+        """Deterministic executable fixtures; mock output is never a research result."""
+        classification = profile.task_type != "regression"
+        linear = "LogisticRegression(max_iter=200, random_state=42)" if classification else "Ridge(alpha=1.5)"
+        tree = "HistGradientBoostingClassifier" if classification else "HistGradientBoostingRegressor"
+        expressions = [f"make_pipeline(StandardScaler(), {linear})", f"{tree}(max_iter=60, random_state=42)"]
+        random.Random(seed).shuffle(expressions)
+        prediction = "model.predict_proba(X_test)[:, 1]" if profile.metric == "roc_auc" else "model.predict(X_test)"
+        def code(expression):
+            return ("from sklearn.pipeline import make_pipeline\n"
+                    "from sklearn.preprocessing import StandardScaler\n"
+                    "from sklearn.linear_model import LogisticRegression, Ridge\n"
+                    "from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor\n"
+                    "def fit_predict(X_train, y_train, X_test):\n"
+                    f"    model = {expression}\n"
+                    "    model.fit(X_train, y_train)\n"
+                    f"    return {prediction}\n")
+        return CandidatePair(expressions[0], code(expressions[0]), expressions[1], code(expressions[1]), operator)
 
     async def close(self):
         await self._http_client.aclose()

@@ -11,41 +11,22 @@ Defines 5 orthogonal axes of ML experimentation:
 from __future__ import annotations
 
 COMMON_CODE_RULES = """
-CODE INTEGRITY & EXECUTION SPEED REQUIREMENTS:
-1. Load data strictly using:
-   import numpy as np
-   data = np.load("data.npz")
-   X_train, y_train, X_val, y_val = data["X_tr"], data["y_tr"], data["X_va"], data["y_va"]
-
-2. Metric Computation & Output:
-   - For 'roc_auc' on binary tasks: ALWAYS compute on predict_proba(X_val)[:, 1] (or decision_function if unavailable).
-   - For 'roc_auc' on multiclass tasks: compute roc_auc_score(y_val, clf.predict_proba(X_val), multi_class='ovr').
-   - For 'accuracy', 'f1', 'r2': use appropriate sklearn.metrics functions.
-   - Print the final metric strictly as: print(f"METRIC:{metric_value:.4f}")
-
-3. Execution Speed & Timeout Limits (CRITICAL: Strict 12s wall-time limit):
-   - Keep models fast and lightweight: set n_estimators <= 100, max_iter <= 200, n_jobs=1.
-   - For loops and hyperparameter search: sweep over at most 3-5 scalar values (e.g. for C in [0.01, 0.1, 1.0, 10.0]).
-   - Do NOT run heavy combinatorial GridSearchCV or multi-dimensional grid loops (max 5 total fits, cv=3).
-   - Never nest GridSearchCV inside VotingClassifier or Pipeline (causes parameter naming errors). Directly fit estimators.
-
-4. Stability & Safety:
-   - Never apply feature scalers to target y; scale only X_train and X_val.
-   - Only use scikit-learn, numpy, scipy, pandas. Self-contained, zero network calls.
-   - Set random_state=42 for all stochastic algorithms to ensure deterministic evaluation.
-
-OUTPUT CONTRACT:
-Output strictly valid raw JSON without markdown code fences matching:
-{
-  "candidate_a": {
-    "hypothesis": "<rigorous epistemic hypothesis connecting dataset properties to algorithmic advantage>",
-    "code": "<complete executable python script>"
-  },
-  "candidate_b": {
-    "hypothesis": "<contrasting epistemic hypothesis proposing an orthogonal mechanism>",
-    "code": "<complete executable python script>"
-  }
-}
+Implement def fit_predict(X_train, y_train, X_test) returning a finite numeric 1-D numpy array.
+The evaluator owns the test labels and computes the metric. No metric printing or file access.
+For binary roc_auc return predict_proba(X_test)[:, 1] or decision_function scores.
+For accuracy and binary f1 (positive class 1) return class labels; for r2 return predictions.
+Any preprocessing, model selection, early stopping or threshold tuning uses ONLY training data,
+with an internal training split or cross-validation. Refit on training data before predicting X_test.
+Never load/reconstruct datasets, fetch data, inspect files, or access network/subprocesses.
+Use only numpy/scipy/scikit-learn/pandas. Do not catch training errors or return fallback scores.
+Budget: 12 seconds, at most 5 parameter settings, cv<=3, trees<=80, max_iter<=200.
+Only pass parameters supported by the estimator:
+HistGradientBoosting uses max_iter, NOT n_estimators or n_jobs.
+LogisticRegression: omit multi_class. MLP and Huber: omit n_jobs; Huber: omit random_state.
+Use n_jobs=1 only where supported; random_state=42 only for stochastic estimators.
+Output raw JSON with candidate_a and candidate_b, each containing:
+{"hypothesis": "brief rationale for this implementation", "code": "Python module defining fit_predict"}.
+Keep code concise. No markdown fences.
 """
 
 PROMPTS = {
@@ -76,7 +57,7 @@ Given a dataset profile, test contrasting hyperparameter and complexity configur
 - Candidate A: Explores aggressive regularization / early stopping (strong L1/L2 penalty, low learning rate with shrinkage, shallow depth) to prevent overfitting on noisy features.
 - Candidate B: Explores higher capacity / relaxed regularization (higher complexity, deeper trees, relaxed penalty) to capture subtle weak signals.
 
-Each script MUST execute a clean 3-5 step evaluation loop within the training fold (e.g., simple 3-fold CV or train/val split of X_train) to select the best scalar value before scoring on X_val. Keep n_estimators <= 80 to ensure sub-5s execution.
+Each script MUST execute a clean 3-5 step evaluation loop within the training fold (e.g., simple 3-fold CV or train/val split of X_train) to select the best scalar value before predicting on X_test. Keep n_estimators <= 80 to ensure sub-5s execution.
 {COMMON_CODE_RULES}
 """,
 

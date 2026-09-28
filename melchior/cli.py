@@ -167,7 +167,7 @@ def main() -> None:
         "--model", default="qwen", help="Model name on vLLM server (default: qwen)"
     )
     crucible_parser.add_argument(
-        "--mode", choices=["auto", "api", "mock"], default="auto", help="Mode: auto | api | mock"
+        "--mode", choices=["auto", "api", "opencode", "mock"], default="auto", help="Mode: auto | api | mock"
     )
     crucible_parser.add_argument(
         "--pairs", "-n", type=int, default=None, help="Attempt at most N pairs, including failures (default: run until stopped)"
@@ -201,6 +201,12 @@ def main() -> None:
         "--timeout", type=float, default=14.0, help="Sandbox timeout in seconds (default: 14.0)"
     )
 
+    for run_parser in (crucible_parser, canary_parser):
+        run_parser.add_argument("--resume", action="store_true", help="Resume an identical run without duplicating completed seeds")
+        run_parser.add_argument("--seed-start", type=int, default=1000)
+        run_parser.add_argument("--max-hours", type=float, default=None, help="Stop after this session time budget; incomplete tasks can resume")
+    crucible_parser.add_argument("--split", choices=["train", "eval"], default="train")
+
     args = parser.parse_args()
 
     if args.command == "run":
@@ -222,6 +228,7 @@ def main() -> None:
             llm_mode=args.mode,
             sandbox_timeout_s=args.timeout,
             max_pairs=args.pairs,
+            split=args.split, seed_start=args.seed_start, resume=args.resume, max_hours=args.max_hours,
         )
         asyncio.run(runner.run())
     elif args.command == "canary":
@@ -230,6 +237,7 @@ def main() -> None:
 
         runner = CanaryRunner(
             num_tasks=args.tasks,
+            seed_start=args.seed_start, resume=args.resume, max_hours=args.max_hours,
             concurrency=args.concurrency,
             llm_url=args.url,
             llm_model=args.model,

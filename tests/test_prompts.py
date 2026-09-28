@@ -21,8 +21,8 @@ def test_operator_prompts_complete():
     for op in expected_operators:
         prompt = get_prompt_for_operator(op)
         assert len(prompt) > 200
-        assert "CODE INTEGRITY & EXECUTION SPEED REQUIREMENTS:" in prompt
-        assert "OUTPUT CONTRACT:" in prompt
+        assert "fit_predict(X_train, y_train, X_test)" in prompt
+        assert "candidate_a and candidate_b" in prompt
 
 
 def test_select_operator_by_seed():

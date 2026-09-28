@@ -1,186 +1,44 @@
-"""Objective Ground-Truth Arbiter comparing empirical metrics and producing NLI/DPO records."""
-
-from __future__ import annotations
-
+"""Paired empirical preferences, separate from execution failures."""
 from dataclasses import dataclass
 from typing import Any
-from melchior.crucible.environments import TaskProfile
-from melchior.crucible.client import CandidatePair
-from melchior.crucible.sandbox import SandboxResult
+from melchior.crucible.decisions import comparison, nli_rows
+from melchior.crucible.metrics import paired_interval
 
 
 @dataclass
 class ArbiterOutcome:
-    winner: str  # "A" | "B" | "TIE" | "BOTH_FAILED"
-    delta: float
+    winner: str
+    delta: float | None
     nli_records: list[dict[str, Any]]
     dpo_record: dict[str, Any] | None
+    interval: list[float] | None = None
+    execution_winner: str | None = None
 
 
 class CrucibleArbiter:
-    def __init__(self, min_delta: float = 0.005):
+    def __init__(self, min_delta=0.005):
+        if min_delta < 0:
+            raise ValueError('min_delta must be non-negative')
         self.min_delta = min_delta
 
-    def evaluate(
-        self,
-        profile: TaskProfile,
-        pair: CandidatePair,
-        res_a: SandboxResult,
-        res_b: SandboxResult,
-    ) -> ArbiterOutcome:
-        """Determines the objective winner and formats OpenJev NLI and DPO records."""
-        met_a = res_a.metric if res_a.status == "success" else None
-        met_b = res_b.metric if res_b.status == "success" else None
-
-        premise = (
-            f"Task: {profile.description} "
-            f"Objective: Maximize {profile.metric}. "
-            f"Train samples: {profile.n_train}, Val samples: {profile.n_val}."
-        )
-
-        operator = getattr(pair, "operator", "unknown")
-        nli_records: list[dict[str, Any]] = []
-        dpo_record = None
-        winner = "TIE"
-        delta = 0.0
-
-        if met_a is not None and met_b is not None:
-            diff = met_b - met_a
-            delta = abs(diff)
-
-            if diff > self.min_delta:
-                winner = "B"
-                # B is Entailment (1), A is Contradiction (0)
-                nli_records.append({
-                    "premise": premise,
-                    "hypothesis": pair.hypothesis_b,
-                    "label": 1,
-                    "source": "crucible_ml_empirical",
-                    "metadata": {"task_id": profile.task_id, "metric": met_b, "delta": delta, "operator": operator},
-                })
-                nli_records.append({
-                    "premise": premise,
-                    "hypothesis": pair.hypothesis_a,
-                    "label": 0,
-                    "source": "crucible_ml_empirical",
-                    "metadata": {"task_id": profile.task_id, "metric": met_a, "delta": -delta, "operator": operator},
-                })
-                dpo_record = {
-                    "prompt": premise,
-                    "chosen": f"# Hypothesis: {pair.hypothesis_b}\n{pair.code_b}",
-                    "rejected": f"# Hypothesis: {pair.hypothesis_a}\n{pair.code_a}",
-                    "margin": round(delta, 4),
-                    "operator": operator,
-                }
-
-            elif diff < -self.min_delta:
-                winner = "A"
-                # A is Entailment (1), B is Contradiction (0)
-                nli_records.append({
-                    "premise": premise,
-                    "hypothesis": pair.hypothesis_a,
-                    "label": 1,
-                    "source": "crucible_ml_empirical",
-                    "metadata": {"task_id": profile.task_id, "metric": met_a, "delta": delta, "operator": operator},
-                })
-                nli_records.append({
-                    "premise": premise,
-                    "hypothesis": pair.hypothesis_b,
-                    "label": 0,
-                    "source": "crucible_ml_empirical",
-                    "metadata": {"task_id": profile.task_id, "metric": met_b, "delta": -delta, "operator": operator},
-                })
-                dpo_record = {
-                    "prompt": premise,
-                    "chosen": f"# Hypothesis: {pair.hypothesis_a}\n{pair.code_a}",
-                    "rejected": f"# Hypothesis: {pair.hypothesis_b}\n{pair.code_b}",
-                    "margin": round(delta, 4),
-                    "operator": operator,
-                }
-
-            else:
-                winner = "TIE"
-                # Both valid, neutral difference
-                nli_records.append({
-                    "premise": premise,
-                    "hypothesis": pair.hypothesis_a,
-                    "label": 2,  # Neutral
-                    "source": "crucible_ml_empirical",
-                    "metadata": {"task_id": profile.task_id, "metric": met_a, "delta": 0.0, "operator": operator},
-                })
-
-        elif met_a is not None and met_b is None:
-            winner = "A"
-            delta = 1.0
-            nli_records.append({
-                "premise": premise,
-                "hypothesis": pair.hypothesis_a,
-                "label": 1,
-                "source": "crucible_ml_empirical",
-                "metadata": {"task_id": profile.task_id, "metric": met_a, "status": "success", "operator": operator},
-            })
-            nli_records.append({
-                "premise": premise,
-                "hypothesis": pair.hypothesis_b,
-                "label": 0,
-                "source": "crucible_ml_empirical",
-                "metadata": {"task_id": profile.task_id, "error": res_b.stderr[:150], "status": res_b.status, "operator": operator},
-            })
-            dpo_record = {
-                "prompt": premise,
-                "chosen": f"# Hypothesis: {pair.hypothesis_a}\n{pair.code_a}",
-                "rejected": f"# Hypothesis: {pair.hypothesis_b}\n{pair.code_b}",
-                "margin": 1.0,
-                "operator": operator,
+    def evaluate(self, profile, pair, res_a, res_b, *, y_true=None, seed=42):
+        valid = [r.status == 'success' and r.metric is not None for r in (res_a, res_b)]
+        if not all(valid):
+            execution = 'A' if valid[0] else 'B' if valid[1] else None
+            return ArbiterOutcome('EXECUTION_FAILURE', None, [], None, execution_winner=execution)
+        if y_true is None or not res_a.predictions or not res_b.predictions:
+            raise ValueError('Paired test labels and predictions are required for quality arbitration')
+        diff = res_b.metric - res_a.metric
+        interval = paired_interval(profile.metric, y_true, res_a.predictions, res_b.predictions, seed=seed)
+        winner = 'B' if interval[0] > self.min_delta else 'A' if interval[1] < -self.min_delta else 'UNCERTAIN'
+        outcome = ArbiterOutcome(winner, abs(diff), [], None, interval)
+        if winner in {'A', 'B'}:
+            payload = comparison(profile, pair)
+            outcome.nli_records = nli_rows(payload, winner)
+            chosen, rejected = ('a', 'b') if winner == 'A' else ('b', 'a')
+            outcome.dpo_record = {
+                'prompt': payload['state'],
+                'chosen': getattr(pair, 'code_'+chosen), 'rejected': getattr(pair, 'code_'+rejected),
+                'margin': abs(diff), 'operator': pair.operator,
             }
-
-        elif met_b is not None and met_a is None:
-            winner = "B"
-            delta = 1.0
-            nli_records.append({
-                "premise": premise,
-                "hypothesis": pair.hypothesis_b,
-                "label": 1,
-                "source": "crucible_ml_empirical",
-                "metadata": {"task_id": profile.task_id, "metric": met_b, "status": "success", "operator": operator},
-            })
-            nli_records.append({
-                "premise": premise,
-                "hypothesis": pair.hypothesis_a,
-                "label": 0,
-                "source": "crucible_ml_empirical",
-                "metadata": {"task_id": profile.task_id, "error": res_a.stderr[:150], "status": res_a.status, "operator": operator},
-            })
-            dpo_record = {
-                "prompt": premise,
-                "chosen": f"# Hypothesis: {pair.hypothesis_b}\n{pair.code_b}",
-                "rejected": f"# Hypothesis: {pair.hypothesis_a}\n{pair.code_a}",
-                "margin": 1.0,
-                "operator": operator,
-            }
-
-        else:
-            winner = "BOTH_FAILED"
-            delta = 0.0
-            # Both failed: hard negative contradiction examples
-            nli_records.append({
-                "premise": premise,
-                "hypothesis": pair.hypothesis_a,
-                "label": 0,
-                "source": "crucible_ml_empirical",
-                "metadata": {"task_id": profile.task_id, "error": res_a.stderr[:150], "operator": operator},
-            })
-            nli_records.append({
-                "premise": premise,
-                "hypothesis": pair.hypothesis_b,
-                "label": 0,
-                "source": "crucible_ml_empirical",
-                "metadata": {"task_id": profile.task_id, "error": res_b.stderr[:150], "operator": operator},
-            })
-
-        return ArbiterOutcome(
-            winner=winner,
-            delta=delta,
-            nli_records=nli_records,
-            dpo_record=dpo_record,
-        )
+        return outcome
