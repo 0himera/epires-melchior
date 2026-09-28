@@ -176,6 +176,31 @@ def main() -> None:
         "--timeout", type=float, default=12.0, help="Per-candidate timeout in seconds (default: 12.0)"
     )
 
+    canary_parser = subparsers.add_parser(
+        "canary", help="Run Canary Run (50-100 tasks) with OpenJev baseline benchmarking"
+    )
+    canary_parser.add_argument(
+        "--tasks", "-n", type=int, default=50, help="Number of canary tasks to evaluate (default: 50)"
+    )
+    canary_parser.add_argument(
+        "--concurrency", "-j", type=int, default=10, help="Concurrent workers (default: 10)"
+    )
+    canary_parser.add_argument(
+        "--output", "-o", default="data/crucible_canary", help="Output directory for reports & holdout dataset"
+    )
+    canary_parser.add_argument(
+        "--url", default="http://localhost:8000/v1", help="vLLM endpoint URL"
+    )
+    canary_parser.add_argument(
+        "--model", default="qwen", help="LLM model name"
+    )
+    canary_parser.add_argument(
+        "--jev-url", default="http://localhost:8080/v1/systemone", help="OpenJev endpoint URL"
+    )
+    canary_parser.add_argument(
+        "--timeout", type=float, default=14.0, help="Sandbox timeout in seconds (default: 14.0)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "run":
@@ -197,6 +222,20 @@ def main() -> None:
             llm_mode=args.mode,
             sandbox_timeout_s=args.timeout,
             max_pairs=args.pairs,
+        )
+        asyncio.run(runner.run())
+    elif args.command == "canary":
+        import asyncio
+        from melchior.crucible.canary import CanaryRunner
+
+        runner = CanaryRunner(
+            num_tasks=args.tasks,
+            concurrency=args.concurrency,
+            llm_url=args.url,
+            llm_model=args.model,
+            jev_url=args.jev_url,
+            output_dir=args.output,
+            sandbox_timeout_s=args.timeout,
         )
         asyncio.run(runner.run())
     else:

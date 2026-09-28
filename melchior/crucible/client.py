@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 from dataclasses import dataclass
 import httpx
 from melchior.crucible.environments import TaskProfile
@@ -39,7 +40,7 @@ Code Requirements:
 2. Train model on X_train, y_train and evaluate on X_val, y_val.
 3. Compute the specified metric and print:
    print(f"METRIC:{metric_value:.4f}")
-4. Self-contained (use scikit-learn, numpy, scipy). No network calls.
+4. Self-contained (use scikit-learn, numpy, scipy, pandas). No network calls.
 """
 
 
@@ -49,26 +50,52 @@ class CrucibleLLMClient:
         base_url: str | None = None,
         model: str = "qwen",
         mode: str = "auto",  # auto | api | mock
-        timeout_s: float = 20.0,
+        timeout_s: float = 35.0,
     ):
         self.base_url = base_url or os.getenv("CRUCIBLE_LLM_URL", "http://localhost:8000/v1")
         self.model = model or os.getenv("CRUCIBLE_LLM_MODEL", "qwen")
         self.timeout_s = timeout_s
         self.mode = mode
         self._http_client = httpx.AsyncClient(timeout=timeout_s)
+        self._model_resolved = False
+
+    async def _resolve_model(self) -> str:
+        """Auto-discovers the model ID loaded in vLLM if model is 'qwen' or 'auto'."""
+        if self._model_resolved:
+            return self.model
+        if self.model and self.model not in ["qwen", "auto"]:
+            self._model_resolved = True
+            return self.model
+
+        try:
+            resp = await self._http_client.get(f"{self.base_url.rstrip('/')}/models")
+            if resp.status_code == 200:
+                data = resp.json()
+                if "data" in data and len(data["data"]) > 0:
+                    self.model = data["data"][0]["id"]
+                    self._model_resolved = True
+                    return self.model
+        except Exception:
+            pass
+
+        self._model_resolved = True
+        return self.model
 
     async def generate_pair(self, profile: TaskProfile, seed: int) -> CandidatePair:
         """Asynchronously requests two competing solutions from the LLM endpoint or mock generator."""
-        if self.mode == "api" or (self.mode == "auto" and os.getenv("CRUCIBLE_LLM_URL")):
-            try:
-                return await self._call_vllm(profile)
-            except Exception:
-                # Graceful fallback to generator if vLLM server is unreachable
-                return self._generate_mock(profile, seed)
-        else:
+        if self.mode == "mock":
+            return self._generate_mock(profile, seed)
+
+        try:
+            return await self._call_vllm(profile)
+        except Exception as e:
+            if self.mode == "api":
+                raise RuntimeError(f"vLLM API call failed: {e}") from e
+            # Graceful fallback to generator in auto mode
             return self._generate_mock(profile, seed)
 
     async def _call_vllm(self, profile: TaskProfile) -> CandidatePair:
+        model_name = await self._resolve_model()
         user_prompt = (
             f"Task: {profile.description}\n"
             f"Type: {profile.task_type}\n"
@@ -78,7 +105,7 @@ class CrucibleLLMClient:
         )
 
         payload = {
-            "model": self.model,
+            "model": model_name,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
@@ -95,7 +122,11 @@ class CrucibleLLMClient:
         )
         resp.raise_for_status()
         data = resp.json()
-        content = json.loads(data["choices"][0]["message"]["content"])
+
+        raw_content = data["choices"][0]["message"]["content"].strip()
+        if raw_content.startswith("```"):
+            raw_content = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_content, flags=re.MULTILINE).strip()
+        content = json.loads(raw_content)
 
         return CandidatePair(
             hypothesis_a=content["candidate_a"]["hypothesis"],

@@ -22,9 +22,14 @@ class SandboxResult:
     stderr: str
 
 
+import signal
+
+
 def _set_limits():
-    """Sets memory limit to 2GB per subprocess to protect server RAM."""
+    """Sets memory limit to 2GB per subprocess and starts a new session to prevent zombies."""
     try:
+        if hasattr(os, "setsid"):
+            os.setsid()
         import resource
         limit_bytes = 2 * 1024 * 1024 * 1024  # 2 GB
         resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
@@ -58,6 +63,14 @@ class AsyncSandbox:
         stderr_data = ""
         status = "success"
         metric = None
+        sub_env = os.environ.copy()
+        sub_env.update({
+            "OMP_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+            "VECLIB_MAXIMUM_THREADS": "1",
+            "NUMEXPR_NUM_THREADS": "1",
+        })
 
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -65,6 +78,7 @@ class AsyncSandbox:
                 "-u",
                 str(script_path),
                 cwd=str(temp_dir),
+                env=sub_env,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 preexec_fn=_set_limits if os.name != "nt" else None,
@@ -91,9 +105,12 @@ class AsyncSandbox:
             except asyncio.TimeoutError:
                 status = "timeout"
                 try:
-                    proc.kill()
+                    if os.name != "nt":
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    else:
+                        proc.kill()
                     await proc.wait()
-                except ProcessLookupError:
+                except (ProcessLookupError, OSError):
                     pass
                 stderr_data = f"Execution exceeded timeout of {self.timeout_s}s"
 
