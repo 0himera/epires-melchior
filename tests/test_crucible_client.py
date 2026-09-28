@@ -62,6 +62,9 @@ async def test_incomplete_pair_is_retried_and_operator_reaches_http_prompt():
         assert pair.code_b == VALID_PAIR["candidate_b"]["code"]
         assert len(requests) == 2
         assert requests[0]['response_format']['type'] == 'json_schema'
+        assert requests[0]['reasoning_effort'] == 'xhigh'
+        assert requests[0]['chat_template_kwargs']['enable_thinking'] is True
+        assert requests[0]['max_tokens'] == 12288
         schema = requests[0]['response_format']['json_schema']['schema']
         assert set(schema['required']) == {'candidate_a', 'candidate_b'}
         assert all(r["messages"][0]["content"] == get_prompt_for_operator("pathology_defense")
@@ -183,5 +186,28 @@ async def test_opencode_failures_are_explicit_and_processes_are_reaped(tmp_path,
             await asyncio.wait_for(client.generate_pair(generate_task(42)[0], 42), 3)
         assert len(children) == 2
         assert all(child.poll() is not None for child in children)
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('effort', ['low', 'medium', 'xhigh'])
+async def test_reasoning_level_and_final_json_are_separate(effort):
+    def handler(request):
+        payload = json.loads(request.content)
+        assert payload['reasoning_effort'] == effort
+        assert payload['chat_template_kwargs'] == {'enable_thinking': True, 'reasoning_effort': effort}
+        assert payload['max_tokens'] == 8000
+        return httpx.Response(200, json={'model': 'test-model', 'usage': {'completion_tokens': 123},
+            'choices': [{'finish_reason': 'stop', 'message': {
+                'reasoning': 'Controlled external model trace', 'content': json.dumps(VALID_PAIR)}}]})
+    client = CrucibleLLMClient(mode='api', model='test-model', reasoning_effort=effort, max_tokens=8000)
+    await client._http_client.aclose()
+    client._http_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        pair = await client.generate_pair(generate_task(42)[0], 42)
+        assert pair.generation['reasoning'] == 'Controlled external model trace'
+        assert pair.generation['usage']['completion_tokens'] == 123
+        assert pair.code_a == VALID_PAIR['candidate_a']['code']
     finally:
         await client.close()

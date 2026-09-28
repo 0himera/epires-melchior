@@ -202,6 +202,9 @@ def main() -> None:
     )
 
     for run_parser in (crucible_parser, canary_parser):
+        run_parser.add_argument("--reasoning-effort", choices=["low", "medium", "xhigh"], default="xhigh")
+        run_parser.add_argument("--generation-timeout", type=float, default=300.)
+        run_parser.add_argument("--generation-tokens", type=int, default=12288)
         run_parser.add_argument("--resume", action="store_true", help="Resume an identical run without duplicating completed seeds")
         run_parser.add_argument("--seed-start", type=int, default=1000)
         run_parser.add_argument("--max-hours", type=float, default=None, help="Stop after this session time budget; incomplete tasks can resume")
@@ -222,6 +225,9 @@ def main() -> None:
 
         runner = CrucibleRunner(
             concurrency=args.concurrency,
+            reasoning_effort=args.reasoning_effort,
+            generation_timeout_s=args.generation_timeout,
+            generation_max_tokens=args.generation_tokens,
             output_dir=args.output,
             llm_base_url=args.url,
             llm_model=args.model,
@@ -239,6 +245,9 @@ def main() -> None:
             num_tasks=args.tasks,
             seed_start=args.seed_start, resume=args.resume, max_hours=args.max_hours,
             concurrency=args.concurrency,
+            reasoning_effort=args.reasoning_effort,
+            generation_timeout_s=args.generation_timeout,
+            generation_max_tokens=args.generation_tokens,
             llm_url=args.url,
             llm_model=args.model,
             jev_url=args.jev_url,

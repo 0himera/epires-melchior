@@ -7,7 +7,7 @@ import json
 import os
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import httpx
 from melchior.config import find_opencode_bin
 from melchior.crucible.process import run_process
@@ -25,6 +25,7 @@ class CandidatePair:
     hypothesis_b: str
     code_b: str
     operator: str = "inductive_bias"
+    generation: dict = field(default_factory=dict)
 
 
 CANDIDATE_SCHEMA = {
@@ -89,11 +90,16 @@ class CrucibleLLMClient:
         mode: str = "auto",  # auto | api | opencode | mock
         timeout_s: float = 35.0,
         max_attempts: int = 2,
+        reasoning_effort: str = "xhigh",
+        max_tokens: int = 12288,
     ):
         if mode not in {"auto", "api", "opencode", "mock"}:
             raise ValueError(f"Unknown LLM mode: {mode}")
         if max_attempts < 1 or timeout_s <= 0:
             raise ValueError("max_attempts and timeout_s must be positive")
+        if reasoning_effort not in {"low", "medium", "xhigh"} or max_tokens < 1:
+            raise ValueError("Invalid reasoning effort or token budget")
+        self.reasoning_effort, self.max_tokens = reasoning_effort, max_tokens
         self.base_url = base_url or os.getenv("CRUCIBLE_LLM_URL", "http://localhost:8000/v1")
         self.model = model or os.getenv("CRUCIBLE_LLM_MODEL", "qwen")
         self.timeout_s = timeout_s
@@ -216,8 +222,10 @@ class CrucibleLLMClient:
             ],
             "response_format": {"type": "json_schema", "json_schema": {
                 "name": "candidate_pair", "strict": True, "schema": CANDIDATE_SCHEMA}},
-            "temperature": 0.7,
-            "max_tokens": 4096,
+            "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": self.reasoning_effort},
+            "reasoning_effort": self.reasoning_effort,
+            "temperature": 1.0, "top_p": 0.95, "top_k": 20,
+            "max_tokens": self.max_tokens,
         }
 
         resp = await self._http_client.post(
@@ -233,7 +241,14 @@ class CrucibleLLMClient:
         try:
             if choice.get("finish_reason") == "length":
                 raise ValueError("LLM response was truncated by the token limit")
-            return _parse_candidate_json(raw_content, operator=operator)
+            pair = _parse_candidate_json(raw_content, operator=operator)
+            pair.generation = {
+                "reasoning": choice["message"].get("reasoning") or choice["message"].get("reasoning_content"),
+                "reasoning_effort": self.reasoning_effort, "enable_thinking": True,
+                "usage": data.get("usage"), "finish_reason": choice.get("finish_reason"),
+                "max_tokens": self.max_tokens, "model": data.get("model", model_name),
+            }
+            return pair
         except ValueError as exc:
             exc.response_text = raw_content
             raise

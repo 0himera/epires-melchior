@@ -30,7 +30,8 @@ class CrucibleRunner:
     def __init__(self, concurrency=20, output_dir='data/crucible', llm_base_url=None,
                  llm_model='qwen', llm_mode='auto', sandbox_timeout_s=12., max_pairs=None,
                  *, split='train', seed_start=1000, resume=False, max_hours=None,
-                 min_delta=0.005, jev_url=None):
+                 min_delta=0.005, jev_url=None, reasoning_effort='xhigh',
+                 generation_timeout_s=300., generation_max_tokens=12288):
         if concurrency < 1 or (max_pairs is not None and max_pairs < 0) or seed_start < 0:
             raise ValueError('Invalid concurrency, pair budget or starting seed')
         if split not in {'train', 'eval'} or (max_hours is not None and max_hours <= 0):
@@ -41,12 +42,16 @@ class CrucibleRunner:
         self.llm_mode, self.jev_url = llm_mode, jev_url
         self.sandbox = AsyncSandbox(timeout_s=sandbox_timeout_s)
         self.arbiter = CrucibleArbiter(min_delta)
-        self.client = CrucibleLLMClient(base_url=llm_base_url, model=llm_model, mode=llm_mode, timeout_s=60.)
+        self.client = CrucibleLLMClient(base_url=llm_base_url, model=llm_model, mode=llm_mode,
+                                        timeout_s=generation_timeout_s, reasoning_effort=reasoning_effort,
+                                        max_tokens=generation_max_tokens)
         self.http_client = httpx.AsyncClient(timeout=20.)
         self.manifest = {'schema': CONTRACT_VERSION, 'split': split, 'seed_start': seed_start,
                          'llm_url': self.client.base_url, 'llm_model': llm_model, 'mode': llm_mode,
                          'sandbox_timeout_s': sandbox_timeout_s, 'min_delta': min_delta,
-                         'jev_url': jev_url, **fingerprint()}
+                         'jev_url': jev_url, 'reasoning_effort': reasoning_effort,
+                         'enable_thinking': True, 'generation_timeout_s': generation_timeout_s,
+                         'generation_max_tokens': generation_max_tokens, **fingerprint()}
         self._total_evaluated = 0
 
     async def _query_openjev(self, profile, pair, *, swapped=False):
@@ -64,7 +69,7 @@ class CrucibleRunner:
             # Avoid a fixed association of algorithm family with displayed A/B.
             swapped = bool(hashlib.sha256(f'{self.split}:{seed}:order'.encode()).digest()[0] & 1)
             if swapped:
-                pair = CandidatePair(pair.hypothesis_b, pair.code_b, pair.hypothesis_a, pair.code_a, pair.operator)
+                pair = CandidatePair(pair.hypothesis_b, pair.code_b, pair.hypothesis_a, pair.code_a, pair.operator, generation=pair.generation)
             record.update(pair=asdict(pair), generation_swapped=swapped, resolved_model=self.client.model)
             # TaskGroup cancels and drains the sibling if an execution raises unexpectedly.
             async with asyncio.TaskGroup() as group:

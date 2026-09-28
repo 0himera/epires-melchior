@@ -62,6 +62,14 @@ melchior crucible --mode api --concurrency 8 --max-hours 3 \
   --url http://localhost:8000/v1 --output data/crucible_v2 --resume
 ```
 
+Qwen запускается в vLLM с `--reasoning-parser qwen3`. Клиент явно включает
+`enable_thinking=True` и отделяет reasoning от JSON двух кандидатов.
+`--reasoning-effort low|medium|xhigh` задаёт уровень (по умолчанию `xhigh`).
+`--generation-tokens 12288` — общий бюджет reasoning + ответа;
+`--generation-timeout 300` — таймаут одной попытки генерации. Эти настройки
+сохраняются в manifest; usage и reasoning — в исходных записях, вне NLI-экспорта.
+Сервер должен поддерживать JSON Schema; обрезанный ответ не становится обучающей парой.
+
 `--pairs N` ограничивает общее число seed в прогоне, включая ошибки; при resume
 лимит можно увеличить. `--max-hours` ограничивает текущую сессию. Незавершённые
 задачи повторяются при resume, завершённые (включая ошибки) не повторяются.

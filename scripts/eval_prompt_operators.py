@@ -147,6 +147,7 @@ async def evaluate_operator(
 
 async def main():
     parser = argparse.ArgumentParser(description="Evaluate 5 Crucible Prompt Operators")
+    parser.add_argument("--reasoning-effort", choices=["low", "medium", "xhigh"], default="xhigh")
     parser.add_argument("--mode", default="opencode", choices=["opencode", "api", "mock", "auto"])
     parser.add_argument("--model", default="openai/gpt-6-luna-fast", help="LLM model name")
     parser.add_argument("--url", default="http://localhost:8000/v1", help="vLLM URL if mode=api")
@@ -166,7 +167,7 @@ async def main():
         base_url=args.url,
         model=args.model,
         mode=args.mode,
-        timeout_s=60.0,
+        timeout_s=300.0, reasoning_effort=args.reasoning_effort,
     )
     sandbox = AsyncSandbox(timeout_s=15.0)
     arbiter = CrucibleArbiter(min_delta=0.005)
