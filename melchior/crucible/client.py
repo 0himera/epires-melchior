@@ -28,19 +28,6 @@ class CandidatePair:
     generation: dict = field(default_factory=dict)
 
 
-CANDIDATE_SCHEMA = {
-    "type": "object", "additionalProperties": False,
-    "required": ["candidate_a", "candidate_b"],
-    "properties": {name: {
-        "type": "object", "additionalProperties": False,
-        "required": ["hypothesis", "code"],
-        # vLLM 0.27.1.dev5 on this server masks escaped newlines when
-        # minLength is present. Enforce non-empty strings in the parser instead.
-        "properties": {field: {"type": "string"} for field in ("hypothesis", "code")},
-    } for name in ("candidate_a", "candidate_b")},
-}
-
-
 def _parse_candidate_json(raw_text: str, operator: str = "default") -> CandidatePair:
     """Parses raw model output into CandidatePair with fallback extraction."""
     if not isinstance(raw_text, str) or not raw_text.strip():
@@ -222,8 +209,8 @@ class CrucibleLLMClient:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "response_format": {"type": "json_schema", "json_schema": {
-                "name": "candidate_pair", "strict": True, "schema": CANDIDATE_SCHEMA}},
+            # This vLLM build fails its grammar FSM with reasoning + MTP.
+            # Request ordinary final text; validate the complete pair below.
             "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": self.reasoning_effort},
             "reasoning_effort": self.reasoning_effort,
             "temperature": 1.0, "top_p": 0.95, "top_k": 20,

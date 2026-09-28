@@ -108,3 +108,21 @@ async def test_no_successes_produces_valid_summary(tmp_path, monkeypatch, num_ta
     assert summary['attempts'] == summary['generation_or_pipeline_errors'] == num_tasks
     assert summary['total_candidates'] == summary['jev_scored'] == 0
     assert rows(tmp_path / 'holdout.jsonl') == []
+
+
+@pytest.mark.asyncio
+async def test_real_backend_training_export_contains_only_supported_preferences(tmp_path, monkeypatch):
+    from melchior.crucible.runner import CrucibleRunner
+    monkeypatch.setattr('melchior.crucible.runner.generate_task', tiny_task)
+    runner = CrucibleRunner(concurrency=1, max_pairs=1, output_dir=tmp_path, llm_mode='api',
+                            llm_model='test-model', split='train', sandbox_timeout_s=5)
+    await runner.client._http_client.aclose()
+    runner.client._http_client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: reply(PAIR)))
+    summary = await runner.run()
+    assert summary['decisive_quality_pairs'] == 1
+    nli = rows(tmp_path / 'openjev_ml_nli.jsonl')
+    assert len(nli) == 2 and {r['label'] for r in nli} == {0, 1}
+    assert all(set(r) == {'premise', 'hypothesis', 'label', 'source', 'image'} for r in nli)
+    dpo = rows(tmp_path / 'melchior_dpo_pairs.jsonl')
+    assert len(dpo) == 1 and 'return X_test[:,0]' in dpo[0]['chosen']
+    assert rows(tmp_path / 'holdout.jsonl') == []

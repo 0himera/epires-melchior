@@ -61,14 +61,11 @@ async def test_incomplete_pair_is_retried_and_operator_reaches_http_prompt():
         pair = await client.generate_pair(profile, 42, operator="pathology_defense")
         assert pair.code_b == VALID_PAIR["candidate_b"]["code"]
         assert len(requests) == 2
-        assert requests[0]['response_format']['type'] == 'json_schema'
+        # Server regression: guided JSON decoding fails with reasoning + MTP.
+        assert 'response_format' not in requests[0]
         assert requests[0]['reasoning_effort'] == 'xhigh'
         assert requests[0]['chat_template_kwargs']['enable_thinking'] is True
         assert requests[0]['max_tokens'] == 12288
-        schema = requests[0]['response_format']['json_schema']['schema']
-        assert set(schema['required']) == {'candidate_a', 'candidate_b'}
-        # Deployment regression: minLength prevents escaped newlines in this vLLM build.
-        assert 'minLength' not in schema['properties']['candidate_a']['properties']['code']
         assert all(r["messages"][0]["content"] == get_prompt_for_operator("pathology_defense")
                    for r in requests)
     finally:
