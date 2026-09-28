@@ -30,3 +30,4 @@ journal.jsonl
 .env
 .env.*
 !.env.example
+data/prompt_eval/

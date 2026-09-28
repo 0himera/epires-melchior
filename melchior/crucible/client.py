@@ -9,6 +9,11 @@ import re
 from dataclasses import dataclass
 import httpx
 from melchior.crucible.environments import TaskProfile
+from melchior.crucible.prompts import (
+    OPERATOR_KEYS,
+    get_prompt_for_operator,
+    select_operator_by_seed,
+)
 
 
 @dataclass
@@ -17,31 +22,46 @@ class CandidatePair:
     code_a: str
     hypothesis_b: str
     code_b: str
+    operator: str = "inductive_bias"
 
 
-SYSTEM_PROMPT = """You are an automated ML researcher. Given a dataset profile and target metric, propose TWO competing solutions (Candidate A and Candidate B) exploring different modeling approaches.
-Your output MUST be valid JSON with this exact structure:
-{
-  "candidate_a": {
-    "hypothesis": "<1-2 sentences on why approach A should work>",
-    "code": "<executable python code>"
-  },
-  "candidate_b": {
-    "hypothesis": "<1-2 sentences on why approach B should work>",
-    "code": "<executable python code>"
-  }
-}
+def _parse_candidate_json(raw_text: str, operator: str = "default") -> CandidatePair:
+    """Parses raw model output into CandidatePair with fallback extraction."""
+    raw_text = raw_text.strip()
+    if raw_text.startswith("```"):
+        raw_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text, flags=re.MULTILINE).strip()
+    m_block = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.DOTALL)
+    if m_block:
+        raw_text = m_block.group(1).strip()
 
-Code Requirements:
-1. Load data using:
-   import numpy as np
-   data = np.load("data.npz")
-   X_train, y_train, X_val, y_val = data["X_tr"], data["y_tr"], data["X_va"], data["y_va"]
-2. Train model on X_train, y_train and evaluate on X_val, y_val.
-3. Compute the specified metric and print:
-   print(f"METRIC:{metric_value:.4f}")
-4. Self-contained (use scikit-learn, numpy, scipy, pandas). No network calls.
-"""
+    try:
+        content = json.loads(raw_text)
+    except Exception:
+        start = raw_text.find("{")
+        end = raw_text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            content = json.loads(raw_text[start : end + 1])
+        else:
+            raise ValueError(f"Failed to find JSON object in LLM output: {raw_text[:200]}")
+
+    cand_a = content.get("candidate_a") or content.get("Candidate_A") or {}
+    cand_b = content.get("candidate_b") or content.get("Candidate_B") or {}
+
+    hyp_a = cand_a.get("hypothesis", "")
+    code_a = cand_a.get("code", "")
+    hyp_b = cand_b.get("hypothesis", "")
+    code_b = cand_b.get("code", "")
+
+    if not code_a or not code_b:
+        raise ValueError("Missing code_a or code_b in LLM response")
+
+    return CandidatePair(
+        hypothesis_a=hyp_a,
+        code_a=code_a,
+        hypothesis_b=hyp_b,
+        code_b=code_b,
+        operator=operator,
+    )
 
 
 import asyncio
@@ -86,45 +106,53 @@ class CrucibleLLMClient:
         self._model_resolved = True
         return self.model
 
-    async def generate_pair(self, profile: TaskProfile, seed: int) -> CandidatePair:
+    async def generate_pair(
+        self, profile: TaskProfile, seed: int, operator: str | None = None
+    ) -> CandidatePair:
         """Asynchronously requests two competing solutions from the LLM endpoint, OpenCode, or mock."""
+        selected_op = operator or select_operator_by_seed(seed)
+
         if self.mode == "opencode":
             try:
-                return await self._call_opencode(profile)
+                return await self._call_opencode(profile, selected_op)
             except Exception:
-                return self._generate_mock(profile, seed)
+                return self._generate_mock(profile, seed, selected_op)
         elif self.mode == "mock":
-            return self._generate_mock(profile, seed)
+            return self._generate_mock(profile, seed, selected_op)
         elif self.mode == "api":
             try:
-                return await self._call_vllm(profile)
+                return await self._call_vllm(profile, selected_op)
             except Exception:
-                return self._generate_mock(profile, seed)
+                return self._generate_mock(profile, seed, selected_op)
 
         # auto mode
         try:
-            return await self._call_vllm(profile)
+            return await self._call_vllm(profile, selected_op)
         except Exception:
             if shutil.which("opencode"):
                 try:
-                    return await self._call_opencode(profile)
+                    return await self._call_opencode(profile, selected_op)
                 except Exception:
                     pass
-            return self._generate_mock(profile, seed)
+            return self._generate_mock(profile, seed, selected_op)
 
-    async def _call_opencode(self, profile: TaskProfile) -> CandidatePair:
+    async def _call_opencode(
+        self, profile: TaskProfile, operator: str = "inductive_bias"
+    ) -> CandidatePair:
         """Generates candidate pair via OpenCode CLI."""
         from melchior.config import find_opencode_bin
 
         user_prompt = (
-            f"Task: {profile.description}\n"
-            f"Type: {profile.task_type}\n"
-            f"Target Metric to maximize: {profile.metric}\n"
-            f"Features: {profile.n_features}, Train rows: {profile.n_train}, Val rows: {profile.n_val}\n"
-            f"Propose Candidate A and Candidate B with contrasting architectures or preprocessing.\n"
-            f"Output strictly raw JSON with keys 'candidate_a' and 'candidate_b', without markdown fences."
+            f"Dataset Profile:\n"
+            f"- Description: {profile.description}\n"
+            f"- Task Type: {profile.task_type}\n"
+            f"- Target Metric to maximize: {profile.metric}\n"
+            f"- Features: {profile.n_features}, Train samples: {profile.n_train}, Validation samples: {profile.n_val}\n\n"
+            f"Apply the research operator guidelines above to formulate Candidate A and Candidate B.\n"
+            f"Output strictly valid raw JSON with keys 'candidate_a' and 'candidate_b', without markdown code fences."
         )
-        full_prompt = f"{SYSTEM_PROMPT}\n\n{user_prompt}"
+        system_prompt = get_prompt_for_operator(operator)
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
         opencode_bin = find_opencode_bin() or "opencode"
 
         cmd = [opencode_bin, "run", "--pure", "--format", "json"]
@@ -151,36 +179,31 @@ class CrucibleLLMClient:
                 pass
 
         full_text = "".join(text_parts)
-        m = re.search(r"\{.*\}", full_text, re.DOTALL)
-        if m:
-            content = json.loads(m.group(0))
-            return CandidatePair(
-                hypothesis_a=content["candidate_a"]["hypothesis"],
-                code_a=content["candidate_a"]["code"],
-                hypothesis_b=content["candidate_b"]["hypothesis"],
-                code_b=content["candidate_b"]["code"],
-            )
-        raise ValueError("Failed to parse JSON from opencode output")
+        return _parse_candidate_json(full_text, operator=operator)
 
-    async def _call_vllm(self, profile: TaskProfile) -> CandidatePair:
+    async def _call_vllm(
+        self, profile: TaskProfile, operator: str = "inductive_bias"
+    ) -> CandidatePair:
         model_name = await self._resolve_model()
         user_prompt = (
-            f"Task: {profile.description}\n"
-            f"Type: {profile.task_type}\n"
-            f"Target Metric to maximize: {profile.metric}\n"
-            f"Features: {profile.n_features}, Train rows: {profile.n_train}, Val rows: {profile.n_val}\n"
-            f"Propose Candidate A and Candidate B with contrasting architectures or preprocessing."
+            f"Dataset Profile:\n"
+            f"- Description: {profile.description}\n"
+            f"- Task Type: {profile.task_type}\n"
+            f"- Target Metric to maximize: {profile.metric}\n"
+            f"- Features: {profile.n_features}, Train samples: {profile.n_train}, Validation samples: {profile.n_val}\n\n"
+            f"Apply the research operator guidelines to formulate Candidate A and Candidate B."
         )
+        system_prompt = get_prompt_for_operator(operator)
 
         payload = {
             "model": model_name,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "response_format": {"type": "json_object"},
             "temperature": 0.7,
-            "max_tokens": 1500,
+            "max_tokens": 2048,
         }
 
         resp = await self._http_client.post(
@@ -192,18 +215,9 @@ class CrucibleLLMClient:
         data = resp.json()
 
         raw_content = data["choices"][0]["message"]["content"].strip()
-        if raw_content.startswith("```"):
-            raw_content = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_content, flags=re.MULTILINE).strip()
-        content = json.loads(raw_content)
+        return _parse_candidate_json(raw_content, operator=operator)
 
-        return CandidatePair(
-            hypothesis_a=content["candidate_a"]["hypothesis"],
-            code_a=content["candidate_a"]["code"],
-            hypothesis_b=content["candidate_b"]["hypothesis"],
-            code_b=content["candidate_b"]["code"],
-        )
-
-    def _generate_mock(self, profile: TaskProfile, seed: int) -> CandidatePair:
+    def _generate_mock(self, profile: TaskProfile, seed: int, operator: str = "inductive_bias") -> CandidatePair:
         """High-variety offline code synthesizer for testing and local generation."""
         rng = random.Random(seed)
 
@@ -329,6 +343,7 @@ print(f"METRIC:{{score:.4f}}")
             code_a=code_a,
             hypothesis_b=f"Using {cand_b_name} will provide better generalization for {profile.metric}.",
             code_b=code_b,
+            operator=operator,
         )
 
     async def close(self):
