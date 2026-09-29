@@ -43,7 +43,8 @@ class Settings(BaseModel):
     jev_api_key: str | None = Field(default_factory=lambda: os.getenv("JEV_API_KEY"))
     jev_api_url: str = Field(
         default_factory=lambda: os.getenv(
-            "JEV_API_URL", "https://api.typesafe.ai/v1/systemone"
+            "JEV_API_URL", "http://localhost:8080/v1/systemone"
+            if os.getenv("MELCHIOR_JEV_MODE") == "local" else "https://api.typesafe.ai/v1/systemone"
         )
     )
 

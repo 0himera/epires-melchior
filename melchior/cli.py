@@ -202,6 +202,7 @@ def main() -> None:
     )
 
     for run_parser in (crucible_parser, canary_parser):
+        run_parser.add_argument('--task-pack', default=None, help='Frozen task pack directory, including all input arrays')
         run_parser.add_argument("--reasoning-effort", choices=["low", "medium", "xhigh"], default="xhigh")
         run_parser.add_argument("--generation-timeout", type=float, default=600.)
         run_parser.add_argument("--generation-tokens", type=int, default=16384)
@@ -209,6 +210,7 @@ def main() -> None:
         run_parser.add_argument("--seed-start", type=int, default=1000)
         run_parser.add_argument("--max-hours", type=float, default=None, help="Stop after this session time budget; incomplete tasks can resume")
     crucible_parser.add_argument("--split", choices=["train", "eval"], default="train")
+    canary_parser.add_argument('--jev-adapter-sha256', default=None, help='Require this adapter at startup and in every judge response')
 
     args = parser.parse_args()
 
@@ -234,6 +236,7 @@ def main() -> None:
             llm_mode=args.mode,
             sandbox_timeout_s=args.timeout,
             max_pairs=args.pairs,
+            task_pack=args.task_pack,
             split=args.split, seed_start=args.seed_start, resume=args.resume, max_hours=args.max_hours,
         )
         asyncio.run(runner.run())
@@ -243,6 +246,7 @@ def main() -> None:
 
         runner = CanaryRunner(
             num_tasks=args.tasks,
+            task_pack=args.task_pack, jev_adapter_sha256=args.jev_adapter_sha256,
             seed_start=args.seed_start, resume=args.resume, max_hours=args.max_hours,
             concurrency=args.concurrency,
             reasoning_effort=args.reasoning_effort,

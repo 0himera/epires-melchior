@@ -98,7 +98,9 @@ def real_task(spec, split_seed: int):
         kwargs["target_column"] = target_column
     source = fetch_openml(**kwargs)
     frame = source.data.copy()
-    dropped = [col for col in frame if col.lower() == "id" or frame[col].nunique(dropna=True) > .8 * len(frame)]
+    # Continuous measurements can be unique on every row. Cardinality alone
+    # cannot identify an ID column, and must not discard numeric features.
+    dropped = [col for col in frame if col.lower() == "id"]
     frame = frame.drop(columns=dropped)
     target = np.asarray(source.target.astype(float) if task_type == "regression" else LabelEncoder().fit_transform(source.target))
     # Bound runtime without using the hidden test labels during preprocessing.

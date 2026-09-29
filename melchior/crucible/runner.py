@@ -4,6 +4,7 @@ import asyncio
 from collections import Counter
 from dataclasses import asdict
 import hashlib
+import itertools
 import math
 from pathlib import Path
 import time
@@ -16,6 +17,7 @@ from melchior.crucible.arbiter import CrucibleArbiter
 from melchior.crucible.decisions import comparison, normalize_pair, symmetric_choice, answer_probability_a
 from melchior.crucible.metrics import CONTRACT_VERSION
 from melchior.crucible.storage import RunStore, fingerprint, atomic_json
+from melchior.crucible.task_pack import TaskPack
 
 
 def parse_answer(data):
@@ -23,7 +25,12 @@ def parse_answer(data):
     choice, confidence = ans['choice'], float(ans['confidence'])
     if choice not in {'A', 'B'} or not math.isfinite(confidence) or not 0 <= confidence <= 1:
         raise ValueError('Invalid OpenJev choice or confidence')
-    return {'choice': choice, 'confidence': confidence}
+    result = {'choice': choice, 'confidence': confidence}
+    if 'probabilities' in ans:
+        result['probabilities'] = ans['probabilities']
+    if 'model_identity' in data:
+        result['model_identity'] = data['model_identity']
+    return result
 
 
 class CrucibleRunner:
@@ -31,7 +38,8 @@ class CrucibleRunner:
                  llm_model='qwen', llm_mode='auto', sandbox_timeout_s=12., max_pairs=None,
                  *, split='train', seed_start=1000, resume=False, max_hours=None,
                  min_delta=0.005, jev_url=None, reasoning_effort='xhigh',
-                 generation_timeout_s=600., generation_max_tokens=16384):
+                 generation_timeout_s=600., generation_max_tokens=16384,
+                 task_pack=None, jev_adapter_sha256=None):
         if concurrency < 1 or (max_pairs is not None and max_pairs < 0) or seed_start < 0:
             raise ValueError('Invalid concurrency, pair budget or starting seed')
         if split not in {'train', 'eval'} or (max_hours is not None and max_hours <= 0):
@@ -40,12 +48,18 @@ class CrucibleRunner:
         self.output_dir = Path(output_dir)
         self.split, self.seed_start, self.resume, self.max_hours = split, seed_start, resume, max_hours
         self.llm_mode, self.jev_url = llm_mode, jev_url
+        self.task_pack = TaskPack(task_pack, split=split) if task_pack else None
+        if self.task_pack and max_pairs is not None and max_pairs > len(self.task_pack.seeds):
+            raise ValueError('Pair budget exceeds frozen task pack size')
+        if jev_adapter_sha256 and not jev_url:
+            raise ValueError('A pinned OpenJev adapter requires its server URL')
+        self.jev_adapter_sha256 = jev_adapter_sha256
         self.sandbox = AsyncSandbox(timeout_s=sandbox_timeout_s)
         self.arbiter = CrucibleArbiter(min_delta)
         self.client = CrucibleLLMClient(base_url=llm_base_url, model=llm_model, mode=llm_mode,
                                         timeout_s=generation_timeout_s, reasoning_effort=reasoning_effort,
                                         max_tokens=generation_max_tokens)
-        self.http_client = httpx.AsyncClient(timeout=20.)
+        self.http_client = httpx.AsyncClient(timeout=120.)
         self.manifest = {'schema': CONTRACT_VERSION, 'split': split, 'seed_start': seed_start,
                          'llm_url': self.client.base_url, 'llm_model': llm_model, 'mode': llm_mode,
                          'sandbox_timeout_s': sandbox_timeout_s, 'min_delta': min_delta,
@@ -53,17 +67,29 @@ class CrucibleRunner:
                          'enable_thinking': True, 'generation_timeout_s': generation_timeout_s,
                          'generation_max_tokens': generation_max_tokens, **fingerprint()}
         self._total_evaluated = 0
+        if self.task_pack:
+            self.manifest['task_pack_sha256'] = self.task_pack.sha256
+            self.manifest['task_seeds'] = list(self.task_pack.seeds[:max_pairs])
+        if jev_adapter_sha256:
+            self.manifest['jev_adapter_sha256'] = jev_adapter_sha256
 
     async def _query_openjev(self, profile, pair, *, swapped=False):
         response = await self.http_client.post(self.jev_url, json=comparison(profile, pair, swapped=swapped))
         response.raise_for_status()
-        return parse_answer(response.json())
+        data = response.json()
+        if self.jev_adapter_sha256 and data.get('model_identity', {}).get('adapter_sha256') != self.jev_adapter_sha256:
+            raise ValueError('OpenJev response adapter identity mismatch')
+        return parse_answer(data)
 
     async def _process_task(self, seed):
         record = {'schema': CONTRACT_VERSION, 'seed': seed, 'mode': self.llm_mode}
         started = time.monotonic()
         try:
-            profile, X_train, y_train, X_test, y_test = generate_task(seed, split=self.split)
+            if self.task_pack:
+                profile, X_train, y_train, X_test, y_test = self.task_pack.load(seed)
+                record['task_input'] = self.task_pack.metadata(seed)
+            else:
+                profile, X_train, y_train, X_test, y_test = generate_task(seed, split=self.split)
             record['profile'] = asdict(profile)
             pair = await self.client.generate_pair(profile, seed)
             pair = CandidatePair(**normalize_pair(pair))
@@ -113,6 +139,8 @@ class CrucibleRunner:
                    'jev_scored': len(jev), 'jev_errors': sum('jev_error' in r for r in decisive),
                    'jev_correct': sum(j['correct'] for j in jev),
                    'jev_swap_consistent': sum(j['swap_consistent'] for j in jev),
+                   'jev_symmetric_correct': sum(j['symmetric']['choice'] == r['outcome']['winner']
+                                                for r in decisive if (j := r.get('jev'))),
                    'session_elapsed_s': time.monotonic()-self._start_time}
         atomic_json(self.output_dir / 'summary.json', summary)
         return summary
@@ -122,6 +150,14 @@ class CrucibleRunner:
         store, workers = None, []
         status = 'failed'
         try:
+            if self.jev_adapter_sha256:
+                health_url = httpx.URL(self.jev_url).copy_with(path='/health', query=None)
+                response = await self.http_client.get(health_url)
+                response.raise_for_status()
+                identity = response.json().get('model_identity', {})
+                if identity.get('adapter_sha256') != self.jev_adapter_sha256:
+                    raise ValueError('OpenJev startup adapter identity mismatch')
+                self.manifest['jev_model_identity'] = identity
             if self.llm_mode != 'mock':
                 startup_timeout = self.client.timeout_s
                 if self.max_hours is not None:
@@ -130,17 +166,20 @@ class CrucibleRunner:
             store = RunStore(self.output_dir, self.manifest, resume=self.resume)
             done = store.completed()
             store.export()
-            next_seed = self.seed_start
+            if self.task_pack:
+                seeds = iter(self.task_pack.seeds[:self.max_pairs])
+            elif self.max_pairs is None:
+                seeds = itertools.count(self.seed_start)
+            else:
+                seeds = iter(range(self.seed_start, self.seed_start + self.max_pairs))
             deadline = self._start_time + self.max_hours*3600 if self.max_hours is not None else math.inf
             async def worker():
-                nonlocal next_seed
                 while time.monotonic() < deadline:
-                    while next_seed in done:
-                        next_seed += 1
-                    if self.max_pairs is not None and next_seed >= self.seed_start+self.max_pairs:
+                    seed = next(seeds, None)
+                    while seed in done:
+                        seed = next(seeds, None)
+                    if seed is None:
                         return
-                    seed = next_seed
-                    next_seed += 1
                     record = await self._process_task(seed)
                     store.save(record)
                     done.add(seed)

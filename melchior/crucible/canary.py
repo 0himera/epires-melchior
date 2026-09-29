@@ -7,11 +7,13 @@ class CanaryRunner(CrucibleRunner):
                  llm_model='qwen', jev_url='http://localhost:8080/v1/systemone',
                  output_dir='data/crucible_canary', sandbox_timeout_s=14., min_delta=0.01,
                  *, seed_start=1000, resume=False, max_hours=None, reasoning_effort='xhigh',
-                 generation_timeout_s=600., generation_max_tokens=16384):
+                 generation_timeout_s=600., generation_max_tokens=16384,
+                 task_pack=None, jev_adapter_sha256=None):
         super().__init__(concurrency=concurrency, output_dir=output_dir,
                          llm_base_url=llm_url, llm_model=llm_model, llm_mode='api',
                          sandbox_timeout_s=sandbox_timeout_s, max_pairs=num_tasks,
                          split='eval', seed_start=seed_start, resume=resume,
                          max_hours=max_hours, min_delta=min_delta, jev_url=jev_url,
                          reasoning_effort=reasoning_effort, generation_timeout_s=generation_timeout_s,
-                         generation_max_tokens=generation_max_tokens)
+                         generation_max_tokens=generation_max_tokens,
+                         task_pack=task_pack, jev_adapter_sha256=jev_adapter_sha256)

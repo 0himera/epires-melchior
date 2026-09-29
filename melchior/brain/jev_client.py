@@ -37,11 +37,14 @@ class JevClient:
         self,
         mode: str = "mock",
         api_key: str | None = None,
-        api_url: str = "https://api.typesafe.ai/v1/systemone",
+        api_url: str | None = None,
     ):
+        if mode not in {"mock", "api", "local"}:
+            raise ValueError(f"Unknown Jev mode: {mode}")
         self.mode = mode
         self.api_key = api_key
-        self.api_url = api_url
+        self.api_url = api_url or ("http://localhost:8080/v1/systemone" if mode == "local"
+                                   else "https://api.typesafe.ai/v1/systemone")
 
     def ask(self, state: str, questions: dict[str, Noul | Choice | Score]) -> dict[str, Any]:
         """Ask Jev a dictionary of typed questions based on state."""
@@ -70,7 +73,7 @@ class JevClient:
         return float(res["q"]["score"])
 
     def _ask_api(self, state: str, questions: dict[str, Any]) -> dict[str, Any]:
-        if not self.api_key:
+        if self.mode == "api" and not self.api_key:
             raise ValueError("JEV_API_KEY required for api mode. Set MELCHIOR_JEV_MODE=mock for offline runs.")
 
         payload_questions = {}
@@ -88,33 +91,25 @@ class JevClient:
 
         payload = {"state": state, "questions": payload_questions}
         data = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         req = urllib.request.Request(
             self.api_url,
             data=data,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
+            headers=headers,
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=120) as resp:
                 resp_data = json.loads(resp.read().decode("utf-8"))
                 return resp_data.get("answers", resp_data)
         except urllib.error.URLError as e:
-            # Fallback gracefully to mock if network/api is unreachable
-            return self._ask_mock(state, questions)
+            raise RuntimeError(f"OpenJev request failed at {self.api_url}: {e}") from e
 
     def _ask_local(self, state: str, questions: dict[str, Any]) -> dict[str, Any]:
-        """OpenJev local cross-encoder fallback."""
-        try:
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
-            import torch
-        except ImportError:
-            # Fallback to mock if transformers or torch not installed
-            return self._ask_mock(state, questions)
-
-        return self._ask_mock(state, questions)
+        """Use the locally served cross-encoder, including its loaded adapter."""
+        return self._ask_api(state, questions)
 
     def _ask_mock(self, state: str, questions: dict[str, Any]) -> dict[str, Any]:
         """Calibrated heuristic System One engine for offline operation and testing.
