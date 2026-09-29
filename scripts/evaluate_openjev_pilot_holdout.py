@@ -1,8 +1,4 @@
-"""Diagnostic evaluation on historical Crucible eval pairs.
-
-These pairs were inspected during development. The result is not an independent
-test and must not be used for checkpoint selection or promotion.
-"""
+"""Evaluate frozen Crucible pairs in both candidate orders with saved scores."""
 import argparse
 from collections import Counter
 import hashlib
@@ -52,7 +48,7 @@ def main(args):
         items.append((row,cohort,digest,encoded,max_tokens))
     overlength=[(r['seed'],cohort,length) for r,cohort,_,_,length in items if length>args.max_length]
     if overlength:
-        raise ValueError(f'Historical pair exceeds model input budget: {overlength}')
+        raise ValueError(f'Pair exceeds model input budget: {overlength}')
 
     base=AutoModelForSequenceClassification.from_pretrained(
         args.model,local_files_only=True,dtype=torch.bfloat16,attn_implementation='sdpa').to('cuda')
@@ -97,7 +93,7 @@ def main(args):
                            'mean_order_disagreement':sum(r['symmetric']['order_disagreement'] for r in rows)/len(rows),
                            'winner_counts':dict(Counter(r['winner'] for r in rows)),
                            'dataset_groups':len({r['dataset_id'] for r in rows})}
-    atomic_json(args.output,{'scope':'historical development data; no checkpoint selection or promotion',
+    atomic_json(args.output,{'scope':args.scope,
                             'model':str(args.model),'adapter':str(args.adapter) if args.adapter else None,
                             'data_sha256':{str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in args.datasets},
                             'max_length':args.max_length,'max_observed_tokens':max(x[-1] for x in items),
@@ -112,5 +108,6 @@ if __name__=='__main__':
     parser.add_argument('--adapter',type=Path)
     parser.add_argument('--datasets',type=Path,nargs='+',required=True)
     parser.add_argument('--max-length',type=int,default=2048)
+    parser.add_argument('--scope',default='historical development data; no checkpoint selection or promotion')
     parser.add_argument('--output',type=Path,required=True)
     main(parser.parse_args())
