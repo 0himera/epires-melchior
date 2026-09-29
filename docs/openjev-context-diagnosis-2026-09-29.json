@@ -1,0 +1,1069 @@
+{
+  "scope": "Post-hoc diagnosis, no training or checkpoint selection",
+  "source_archive": "artifacts/openjev_research_20260929/context_diagnosis/",
+  "corpus_pairs": 64,
+  "cv_unique_candidates": 78,
+  "cv_fits": 234,
+  "cv_fit_status": {
+    "success": 234
+  },
+  "cv_total_fit_seconds": 323.855,
+  "inference_variants": 295,
+  "inference_http_requests": 590,
+  "inference_nli_sequences": 1180,
+  "full_choices_matching_original": 64,
+  "cv_dataset_groups": 6,
+  "important_limit": "Only decisive archived pairs. Inner folds use already preprocessed outer training arrays. No outer test arrays or labels loaded for CV.",
+  "errors": [],
+  "training": {
+    "train": {
+      "sha256": "5618a747eebb764cf77cf4dc4bbee54617bf3662dab4a81314f12a88feb831da",
+      "groups": 206,
+      "group_prefix": {
+        "synthetic": 206
+      },
+      "metrics": {
+        "accuracy": 86,
+        "roc_auc": 48,
+        "r2": 62,
+        "f1": 10
+      },
+      "operators": {
+        "data_centric": 67,
+        "hyperparameter_frontier": 54,
+        "inductive_bias": 64,
+        "ensemble_diversity": 18,
+        "pathology_defense": 3
+      },
+      "winners": {
+        "B": 110,
+        "A": 96
+      }
+    },
+    "dev": {
+      "sha256": "10fc47e26306a86f92bca6060248765f2cbdfc095a772b17ea3ac1c8aae6ff6d",
+      "groups": 52,
+      "group_prefix": {
+        "synthetic": 50,
+        "load_breast_cancer": 1,
+        "load_wine": 1
+      },
+      "metrics": {
+        "accuracy": 22,
+        "f1": 3,
+        "r2": 15,
+        "roc_auc": 12
+      },
+      "operators": {
+        "inductive_bias": 16,
+        "hyperparameter_frontier": 14,
+        "ensemble_diversity": 4,
+        "data_centric": 17,
+        "pathology_defense": 1
+      },
+      "winners": {
+        "B": 26,
+        "A": 26
+      }
+    }
+  },
+  "results": {
+    "run": {
+      "full": {
+        "n": 25,
+        "correct": 23,
+        "accuracy": 0.92,
+        "binary_brier": 0.06910165599999998,
+        "binary_log_loss": 0.2301785992992297,
+        "mean_relative_entailment_confidence": 0.948524,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 1,
+            "mean_score": 0.6544,
+            "accuracy": 1.0
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 3,
+            "mean_score": 0.8512333333333334,
+            "accuracy": 0.6666666666666666
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 21,
+            "mean_score": 0.9764285714285712,
+            "accuracy": 0.9523809523809523
+          }
+        ]
+      },
+      "no_rationale": {
+        "n": 25,
+        "correct": 23,
+        "accuracy": 0.92,
+        "binary_brier": 0.06047089850000001,
+        "binary_log_loss": 0.2155528584250995,
+        "mean_relative_entailment_confidence": 0.9175059999999999,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 1,
+            "mean_score": 0.6867000000000001,
+            "accuracy": 0.0
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 5,
+            "mean_score": 0.8304600000000001,
+            "accuracy": 1.0
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 19,
+            "mean_score": 0.9525605263157896,
+            "accuracy": 0.9473684210526315
+          }
+        ]
+      },
+      "no_code": {
+        "n": 25,
+        "correct": 22,
+        "accuracy": 0.88,
+        "binary_brier": 0.08168648319999999,
+        "binary_log_loss": 0.25158912112847287,
+        "mean_relative_entailment_confidence": 0.9214880000000001,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 2,
+            "mean_score": 0.6608750000000001,
+            "accuracy": 0.5
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 2,
+            "mean_score": 0.782525,
+            "accuracy": 0.5
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 21,
+            "mean_score": 0.9595428571428573,
+            "accuracy": 0.9523809523809523
+          }
+        ]
+      },
+      "anonymous_task": {
+        "n": 25,
+        "correct": 22,
+        "accuracy": 0.88,
+        "binary_brier": 0.0826005846,
+        "binary_log_loss": 0.2716295125919706,
+        "mean_relative_entailment_confidence": 0.932992,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 1,
+            "mean_score": 0.5854,
+            "accuracy": 0.0
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 4,
+            "mean_score": 0.832075,
+            "accuracy": 0.75
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 20,
+            "mean_score": 0.9705550000000003,
+            "accuracy": 0.95
+          }
+        ]
+      },
+      "train_cv": {
+        "n": 0
+      }
+    },
+    "qwen": {
+      "full": {
+        "n": 8,
+        "correct": 6,
+        "accuracy": 0.75,
+        "binary_brier": 0.20087502,
+        "binary_log_loss": 0.620740482978763,
+        "mean_relative_entailment_confidence": 0.923975,
+        "bins": [
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 2,
+            "mean_score": 0.7802,
+            "accuracy": 0.5
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 6,
+            "mean_score": 0.9719000000000001,
+            "accuracy": 0.8333333333333334
+          }
+        ]
+      },
+      "no_rationale": {
+        "n": 8,
+        "correct": 6,
+        "accuracy": 0.75,
+        "binary_brier": 0.2537708315625,
+        "binary_log_loss": 0.9238785276533005,
+        "mean_relative_entailment_confidence": 0.88141875,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 1,
+            "mean_score": 0.59365,
+            "accuracy": 1.0
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 3,
+            "mean_score": 0.8925166666666667,
+            "accuracy": 1.0
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 4,
+            "mean_score": 0.9450375000000001,
+            "accuracy": 0.5
+          }
+        ]
+      },
+      "no_code": {
+        "n": 8,
+        "correct": 6,
+        "accuracy": 0.75,
+        "binary_brier": 0.2056021921875,
+        "binary_log_loss": 0.5882701307420168,
+        "mean_relative_entailment_confidence": 0.88409375,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 1,
+            "mean_score": 0.63,
+            "accuracy": 1.0
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 3,
+            "mean_score": 0.8531999999999998,
+            "accuracy": 0.3333333333333333
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 4,
+            "mean_score": 0.9707874999999999,
+            "accuracy": 1.0
+          }
+        ]
+      },
+      "anonymous_task": {
+        "n": 8,
+        "correct": 6,
+        "accuracy": 0.75,
+        "binary_brier": 0.20734898250000003,
+        "binary_log_loss": 0.6726642624902054,
+        "mean_relative_entailment_confidence": 0.9388375,
+        "bins": [
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 2,
+            "mean_score": 0.82385,
+            "accuracy": 0.5
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 6,
+            "mean_score": 0.9771666666666666,
+            "accuracy": 0.8333333333333334
+          }
+        ]
+      },
+      "train_cv": {
+        "n": 8,
+        "correct": 8,
+        "accuracy": 1.0,
+        "binary_brier": 0.00015813906249999976,
+        "binary_log_loss": 0.01012389712700915,
+        "mean_relative_entailment_confidence": 0.9899562500000001,
+        "bins": [
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 8,
+            "mean_score": 0.9899562500000001,
+            "accuracy": 1.0
+          }
+        ],
+        "direct_cv_correct": 8
+      }
+    },
+    "portfolio": {
+      "full": {
+        "n": 31,
+        "correct": 21,
+        "accuracy": 0.6774193548387096,
+        "binary_brier": 0.2646199459677419,
+        "binary_log_loss": 0.8405032832916555,
+        "mean_relative_entailment_confidence": 0.8756064516129031,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 5,
+            "mean_score": 0.62954,
+            "accuracy": 0.6
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 7,
+            "mean_score": 0.8611857142857142,
+            "accuracy": 0.8571428571428571
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 19,
+            "mean_score": 0.9456736842105261,
+            "accuracy": 0.631578947368421
+          }
+        ]
+      },
+      "no_rationale": {
+        "n": 31,
+        "correct": 23,
+        "accuracy": 0.7419354838709677,
+        "binary_brier": 0.20864417306451616,
+        "binary_log_loss": 0.6344206457050462,
+        "mean_relative_entailment_confidence": 0.829525806451613,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 5,
+            "mean_score": 0.5822700000000001,
+            "accuracy": 0.6
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 13,
+            "mean_score": 0.8034038461538462,
+            "accuracy": 0.7692307692307693
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 13,
+            "mean_score": 0.9507461538461537,
+            "accuracy": 0.7692307692307693
+          }
+        ]
+      },
+      "no_code": {
+        "n": 31,
+        "correct": 15,
+        "accuracy": 0.4838709677419355,
+        "binary_brier": 0.3911914419354839,
+        "binary_log_loss": 1.246149949364159,
+        "mean_relative_entailment_confidence": 0.8334967741935484,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 6,
+            "mean_score": 0.5533666666666667,
+            "accuracy": 0.5
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 8,
+            "mean_score": 0.81226875,
+            "accuracy": 0.5
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 17,
+            "mean_score": 0.9423558823529412,
+            "accuracy": 0.47058823529411764
+          }
+        ]
+      },
+      "anonymous_task": {
+        "n": 31,
+        "correct": 24,
+        "accuracy": 0.7741935483870968,
+        "binary_brier": 0.21294132975806448,
+        "binary_log_loss": 0.6841018085350677,
+        "mean_relative_entailment_confidence": 0.8656564516129032,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 5,
+            "mean_score": 0.56461,
+            "accuracy": 1.0
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 7,
+            "mean_score": 0.8206928571428571,
+            "accuracy": 0.5714285714285714
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 19,
+            "mean_score": 0.9614447368421053,
+            "accuracy": 0.7894736842105263
+          }
+        ]
+      },
+      "train_cv": {
+        "n": 31,
+        "correct": 31,
+        "accuracy": 1.0,
+        "binary_brier": 3.837629032258056e-05,
+        "binary_log_loss": 0.0054257526322745095,
+        "mean_relative_entailment_confidence": 0.9945935483870967,
+        "bins": [
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 31,
+            "mean_score": 0.9945935483870967,
+            "accuracy": 1.0
+          }
+        ],
+        "direct_cv_correct": 31
+      }
+    },
+    "real": {
+      "full": {
+        "n": 41,
+        "correct": 28,
+        "accuracy": 0.6829268292682927,
+        "binary_brier": 0.2611034570121951,
+        "binary_log_loss": 0.8283919121710084,
+        "mean_relative_entailment_confidence": 0.8889914634146342,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 5,
+            "mean_score": 0.62954,
+            "accuracy": 0.6
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 9,
+            "mean_score": 0.8431888888888889,
+            "accuracy": 0.7777777777777778
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 27,
+            "mean_score": 0.9523055555555554,
+            "accuracy": 0.6666666666666666
+          }
+        ]
+      },
+      "no_rationale": {
+        "n": 41,
+        "correct": 30,
+        "accuracy": 0.7317073170731707,
+        "binary_brier": 0.22773079951219513,
+        "binary_log_loss": 0.7213009966484991,
+        "mean_relative_entailment_confidence": 0.8443048780487805,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 6,
+            "mean_score": 0.5841666666666666,
+            "accuracy": 0.6666666666666666
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 16,
+            "mean_score": 0.8201125,
+            "accuracy": 0.8125
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 19,
+            "mean_score": 0.9468263157894736,
+            "accuracy": 0.6842105263157895
+          }
+        ]
+      },
+      "no_code": {
+        "n": 41,
+        "correct": 22,
+        "accuracy": 0.5365853658536586,
+        "binary_brier": 0.3562684498170732,
+        "binary_log_loss": 1.1178772416923943,
+        "mean_relative_entailment_confidence": 0.8468475609756096,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 7,
+            "mean_score": 0.5643142857142857,
+            "accuracy": 0.5714285714285714
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 11,
+            "mean_score": 0.8234318181818181,
+            "accuracy": 0.45454545454545453
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 23,
+            "mean_score": 0.9440347826086957,
+            "accuracy": 0.5652173913043478
+          }
+        ]
+      },
+      "anonymous_task": {
+        "n": 41,
+        "correct": 31,
+        "accuracy": 0.7560975609756098,
+        "binary_brier": 0.22336577207317074,
+        "binary_log_loss": 0.7207779856134919,
+        "mean_relative_entailment_confidence": 0.884809756097561,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 5,
+            "mean_score": 0.56461,
+            "accuracy": 1.0
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 9,
+            "mean_score": 0.8213944444444444,
+            "accuracy": 0.5555555555555556
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 27,
+            "mean_score": 0.9652444444444446,
+            "accuracy": 0.7777777777777778
+          }
+        ]
+      },
+      "train_cv": {
+        "n": 39,
+        "correct": 39,
+        "accuracy": 1.0,
+        "binary_brier": 6.294301282051273e-05,
+        "binary_log_loss": 0.006389474579912385,
+        "mean_relative_entailment_confidence": 0.9936423076923074,
+        "bins": [
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 39,
+            "mean_score": 0.9936423076923074,
+            "accuracy": 1.0
+          }
+        ],
+        "direct_cv_correct": 39
+      }
+    },
+    "all": {
+      "full": {
+        "n": 64,
+        "correct": 50,
+        "accuracy": 0.78125,
+        "binary_brier": 0.180277498203125,
+        "binary_log_loss": 0.5746248535680027,
+        "mean_relative_entailment_confidence": 0.9101359375,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 6,
+            "mean_score": 0.6336833333333333,
+            "accuracy": 0.6666666666666666
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 12,
+            "mean_score": 0.8452000000000002,
+            "accuracy": 0.75
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 46,
+            "mean_score": 0.9631347826086957,
+            "accuracy": 0.8043478260869565
+          }
+        ]
+      },
+      "no_rationale": {
+        "n": 64,
+        "correct": 52,
+        "accuracy": 0.8125,
+        "binary_brier": 0.15640482,
+        "binary_log_loss": 0.506982651542349,
+        "mean_relative_entailment_confidence": 0.8703796874999999,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 7,
+            "mean_score": 0.5988142857142857,
+            "accuracy": 0.5714285714285714
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 21,
+            "mean_score": 0.8225761904761905,
+            "accuracy": 0.8571428571428571
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 36,
+            "mean_score": 0.9510694444444445,
+            "accuracy": 0.8333333333333334
+          }
+        ]
+      },
+      "no_code": {
+        "n": 64,
+        "correct": 43,
+        "accuracy": 0.671875,
+        "binary_brier": 0.2470924112109375,
+        "binary_log_loss": 0.7754146485068262,
+        "mean_relative_entailment_confidence": 0.8741929687500001,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 9,
+            "mean_score": 0.5857722222222221,
+            "accuracy": 0.5555555555555556
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 13,
+            "mean_score": 0.8171384615384617,
+            "accuracy": 0.46153846153846156
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 42,
+            "mean_score": 0.953657142857143,
+            "accuracy": 0.7619047619047619
+          }
+        ]
+      },
+      "anonymous_task": {
+        "n": 64,
+        "correct": 52,
+        "accuracy": 0.8125,
+        "binary_brier": 0.1613279327734375,
+        "binary_log_loss": 0.5215501246766876,
+        "mean_relative_entailment_confidence": 0.90110703125,
+        "bins": [
+          {
+            "range": [
+              0.5,
+              0.7
+            ],
+            "n": 6,
+            "mean_score": 0.568075,
+            "accuracy": 0.8333333333333334
+          },
+          {
+            "range": [
+              0.7,
+              0.9
+            ],
+            "n": 13,
+            "mean_score": 0.8246807692307693,
+            "accuracy": 0.6153846153846154
+          },
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 45,
+            "mean_score": 0.9675900000000002,
+            "accuracy": 0.8666666666666667
+          }
+        ]
+      },
+      "train_cv": {
+        "n": 39,
+        "correct": 39,
+        "accuracy": 1.0,
+        "binary_brier": 6.294301282051273e-05,
+        "binary_log_loss": 0.006389474579912385,
+        "mean_relative_entailment_confidence": 0.9936423076923074,
+        "bins": [
+          {
+            "range": [
+              0.9,
+              1.0
+            ],
+            "n": 39,
+            "mean_score": 0.9936423076923074,
+            "accuracy": 1.0
+          }
+        ],
+        "direct_cv_correct": 39
+      }
+    }
+  },
+  "changed_from_full": {
+    "no_rationale": {
+      "n": 64,
+      "flips": 2,
+      "corrected": 2,
+      "regressed": 0
+    },
+    "no_code": {
+      "n": 64,
+      "flips": 7,
+      "corrected": 0,
+      "regressed": 7
+    },
+    "anonymous_task": {
+      "n": 64,
+      "flips": 4,
+      "corrected": 3,
+      "regressed": 1
+    },
+    "train_cv": {
+      "n": 39,
+      "flips": 12,
+      "corrected": 12,
+      "regressed": 0
+    }
+  },
+  "errors_full": [
+    {
+      "cohort": "run",
+      "seed": 90026,
+      "dataset_id": "synthetic:eval:90026:2",
+      "winner": "A",
+      "choice": "B",
+      "probabilities": {
+        "A": 0.18414999999999998,
+        "B": 0.81585
+      }
+    },
+    {
+      "cohort": "run",
+      "seed": 90100,
+      "dataset_id": "openml:54:2718",
+      "winner": "B",
+      "choice": "A",
+      "probabilities": {
+        "A": 0.9455,
+        "B": 0.05449999999999999
+      }
+    },
+    {
+      "cohort": "qwen",
+      "seed": 92000,
+      "dataset_id": "openml:562:4061",
+      "winner": "A",
+      "choice": "B",
+      "probabilities": {
+        "A": 0.05295,
+        "B": 0.94705
+      }
+    },
+    {
+      "cohort": "qwen",
+      "seed": 92006,
+      "dataset_id": "openml:42165:4063",
+      "winner": "B",
+      "choice": "A",
+      "probabilities": {
+        "A": 0.80415,
+        "B": 0.19584999999999997
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 4207754781,
+      "dataset_id": "openml:562:4061",
+      "winner": "A",
+      "choice": "B",
+      "probabilities": {
+        "A": 0.03889999999999999,
+        "B": 0.9611000000000001
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 2096383783,
+      "dataset_id": "openml:562:4061",
+      "winner": "B",
+      "choice": "A",
+      "probabilities": {
+        "A": 0.917,
+        "B": 0.08299999999999996
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 1791667807,
+      "dataset_id": "openml:562:4062",
+      "winner": "A",
+      "choice": "B",
+      "probabilities": {
+        "A": 0.06865000000000004,
+        "B": 0.9313499999999999
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 2528556587,
+      "dataset_id": "openml:562:4062",
+      "winner": "A",
+      "choice": "B",
+      "probabilities": {
+        "A": 0.3441,
+        "B": 0.6558999999999999
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 3058339395,
+      "dataset_id": "openml:562:4063",
+      "winner": "A",
+      "choice": "B",
+      "probabilities": {
+        "A": 0.08174999999999999,
+        "B": 0.91825
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 3548399038,
+      "dataset_id": "openml:562:4063",
+      "winner": "A",
+      "choice": "B",
+      "probabilities": {
+        "A": 0.09050000000000002,
+        "B": 0.9095
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 3324542236,
+      "dataset_id": "openml:562:4064",
+      "winner": "B",
+      "choice": "A",
+      "probabilities": {
+        "A": 0.9611000000000001,
+        "B": 0.038899999999999935
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 4065075877,
+      "dataset_id": "openml:562:4064",
+      "winner": "B",
+      "choice": "A",
+      "probabilities": {
+        "A": 0.917,
+        "B": 0.08299999999999996
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 3792413882,
+      "dataset_id": "openml:42165:4062",
+      "winner": "A",
+      "choice": "B",
+      "probabilities": {
+        "A": 0.4083,
+        "B": 0.5917
+      }
+    },
+    {
+      "cohort": "portfolio",
+      "seed": 71821355,
+      "dataset_id": "openml:42165:4063",
+      "winner": "B",
+      "choice": "A",
+      "probabilities": {
+        "A": 0.8853,
+        "B": 0.11470000000000002
+      }
+    }
+  ]
+}

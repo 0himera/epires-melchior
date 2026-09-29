@@ -1,0 +1,207 @@
+{
+  "schema": "openjev-research-source-registry-v1",
+  "review_date": "2026-09-29",
+  "scope": "Source shortlist; dataset cards inspected, full corpora not imported. Training/evaluation assignments are proposals.",
+  "primary_ml_supervision": {
+    "url": "https://github.com/autogluon/tabarena/blob/main/tabrepo.md",
+    "name": "TabRepo/TabArena",
+    "role": "empirical_ml_selection",
+    "split_group": "dataset_provenance_family",
+    "first_download": "configuration and metric metadata; optional subset of predictions",
+    "runtime_alignment_required": true
+  },
+  "general_eval_kit": {
+    "url": "https://github.com/apolinario/decision-index",
+    "revision": "87d4650b42b377c0291a89c1f1a879f9b31082bf",
+    "edition": "0.2.1",
+    "requirement": "Faithful Score rubric mapping and schema validation before full HTTP run."
+  },
+  "datasets": [
+    {
+      "id": "tasksource/tasksource-jev-typed-decisions",
+      "revision": "8173a06c7bb640b6158c6a93519cb535196bef15",
+      "url": "https://huggingface.co/datasets/tasksource/tasksource-jev-typed-decisions",
+      "card_sha256": "7f67fe8dc291d12658e729c6c497c46369e6e3e47c579a8077048c690f45661e",
+      "role": "replay",
+      "label_provenance": "human_and_rule",
+      "split_group": "upstream_family",
+      "allowed_training_splits": [
+        "train"
+      ],
+      "overlap_note": "procedural rows also appear in tasksource-jev; deduplicate by upstream identity."
+    },
+    {
+      "id": "tasksource/procedural-typed-decisions",
+      "revision": "609513a3faddf729123266efe9861456fe748f95",
+      "url": "https://huggingface.co/datasets/tasksource/procedural-typed-decisions",
+      "card_sha256": "962f58df799ef51abfb60270ccb78e3017550cf08cf97549cb07b979615db75e",
+      "role": "train_and_eval_separate",
+      "label_provenance": "exact_rules",
+      "split_group": "template_family",
+      "allowed_training_splits": [
+        "train"
+      ],
+      "overlap_note": "procedural rows also appear in tasksource-jev; deduplicate by upstream identity."
+    },
+    {
+      "id": "Praveenrajus/jev-bench",
+      "revision": "18f88da81c28c2bec55edc31f63f2afdfba109ea",
+      "url": "https://huggingface.co/datasets/Praveenrajus/jev-bench",
+      "card_sha256": "d7028507a560ed3cebf76199534abc3af59a734187dcfde04c9200e40ebbaddf",
+      "role": "calibration_and_retention",
+      "label_provenance": "human",
+      "split_group": "upstream_dataset_and_item",
+      "allowed_training_splits": [
+        "train_only_if_that_source_is_removed_from_eval"
+      ],
+      "contaminated_in_base_v5": [
+        "mmlu",
+        "arc_challenge",
+        "clinc150",
+        "banking77"
+      ]
+    },
+    {
+      "id": "ZefanCai/Open-Jev-v1.1",
+      "revision": "10ad6888333fa97f8c948192797bad3de3040802",
+      "url": "https://huggingface.co/datasets/ZefanCai/Open-Jev-v1.1",
+      "card_sha256": "a03da2ebe94cf27f135b08e77399a2899a554c4fcddd8ee7ffb30940047c423b",
+      "role": "replay",
+      "label_provenance": "mixed",
+      "split_group": "parent_group_and_upstream_source",
+      "allowed_training_splits": [
+        "train"
+      ],
+      "overlap_note": "WANLI overlaps the original OpenJev training family; source-level audit required."
+    },
+    {
+      "id": "SargeDev/jev-distill-corpus-v3",
+      "revision": "fc99c6357a9f89f7512c4a987314352addead049",
+      "url": "https://huggingface.co/datasets/SargeDev/jev-distill-corpus-v3",
+      "card_sha256": "88d6188c1610f503badb3c0ffac19e2c53d3ef7b2a84deb3164a45345dc5c7c2",
+      "role": "later_distillation",
+      "label_provenance": "teacher_distributions",
+      "split_group": "source_family_and_template",
+      "allowed_training_splits": [
+        "train"
+      ],
+      "overlap_note": "Includes ZefanCai/Open-Jev release-v2 rows; teacher agreement is not empirical policy utility."
+    },
+    {
+      "id": "LocalLLaMA/typed-decisions",
+      "revision": "f2491dda413a9d94afcb30464123b429c857e079",
+      "url": "https://huggingface.co/datasets/LocalLLaMA/typed-decisions",
+      "card_sha256": "58626aefc39479dc04a7156a86284d45446a34aee6f5b5859b4c866f2e321cd2",
+      "role": "api_regression",
+      "label_provenance": "teacher_distributions",
+      "split_group": "workflow_and_state",
+      "allowed_training_splits": []
+    },
+    {
+      "id": "samatv256/jev-decisions-v1",
+      "revision": "c12aadf1f01c72616bfab0b02480e21806397669",
+      "url": "https://huggingface.co/datasets/samatv256/jev-decisions-v1",
+      "card_sha256": "70c90a2ae32f100d91d2ee28d89f983b2463035dbdeca31809990dabbfaeb0bb",
+      "role": "agent_train_eligible_subset",
+      "label_provenance": "trajectory_derived",
+      "split_group": "trajectory_and_task",
+      "allowed_training_splits": [
+        "train"
+      ],
+      "required_filter": "training.choice_eligible == true; prefer general-clean-50k for initial tool-selection pilot."
+    },
+    {
+      "id": "nvidia/When2Call",
+      "revision": "0582f7749df63a96fdc3070932e83e72396ace53",
+      "url": "https://huggingface.co/datasets/nvidia/When2Call",
+      "card_sha256": "14217217ba73b9421b5c8ac9b35b0c210836212ea007b65ec866513fdb67aa75",
+      "role": "tool_policy_train_and_eval_separate",
+      "label_provenance": "synthetic_automated",
+      "split_group": "upstream_source_id",
+      "allowed_training_splits": [
+        "train_sft/train",
+        "train_pref/train"
+      ]
+    },
+    {
+      "id": "AndeyTait/JevForge-Mind2Web",
+      "revision": "8c6fa6c9804f5b18b38a5e4dc343d37b4ed7cf2b",
+      "url": "https://huggingface.co/datasets/AndeyTait/JevForge-Mind2Web",
+      "card_sha256": "6e6b63ec7c1f5d49712ab853f44408943f1fc0bf1ef0d52a0a4987ae20f18185",
+      "role": "agent_eval",
+      "label_provenance": "human_derived",
+      "split_group": "website",
+      "allowed_training_splits": []
+    },
+    {
+      "id": "Leoxx/whowhen_pro",
+      "revision": "0bd196c8a040841c4ae167ab33cc8151de246f1f",
+      "url": "https://huggingface.co/datasets/Leoxx/whowhen_pro",
+      "card_sha256": "4b6236f44fe0fdfd93ff76aaa0faa32324c53d7c3284ade03798049430a2db9e",
+      "role": "error_attribution_eval",
+      "label_provenance": "controlled_error_injection",
+      "split_group": "task_and_trajectory",
+      "allowed_training_splits": []
+    },
+    {
+      "id": "ScalerLab/JudgeBench",
+      "revision": "57dd5e0b9817d07f05ec8f45a91b2ce1e310e308",
+      "url": "https://huggingface.co/datasets/ScalerLab/JudgeBench",
+      "card_sha256": "4574f6ad5bb5c8c2a8bd7d357413b010d860f52dcceaea8e78a5c9f4df7a929a",
+      "role": "correctness_eval",
+      "label_provenance": "objective_response_pairs",
+      "split_group": "original_question",
+      "allowed_training_splits": []
+    },
+    {
+      "id": "allenai/reward-bench-2",
+      "revision": "7ff08853b0d5686e79b13fda8677024f566a104a",
+      "url": "https://huggingface.co/datasets/allenai/reward-bench-2",
+      "card_sha256": "4f9f92600767160c6b7b1a3c822361dabfea9ac254f8a152a02cb96ab0650911",
+      "role": "judge_eval",
+      "label_provenance": "curated_preference",
+      "split_group": "prompt_family",
+      "allowed_training_splits": []
+    },
+    {
+      "id": "THU-KEG/RM-Bench",
+      "revision": "5e094adbde982855284918147e84a169f7282a2a",
+      "url": "https://huggingface.co/datasets/THU-KEG/RM-Bench",
+      "card_sha256": "fa02cd98a4575dab2693093a17cc218eedb7e3844f90218b4a2583d274a356b0",
+      "role": "style_bias_eval",
+      "label_provenance": "content_preference_and_style_variants",
+      "split_group": "original_prompt",
+      "allowed_training_splits": []
+    },
+    {
+      "id": "Hangtao/JevAdvBench",
+      "revision": "98ca91015cc83443bfa65732c9711059fc85242e",
+      "url": "https://huggingface.co/datasets/Hangtao/JevAdvBench",
+      "card_sha256": "ce31c30a048c29a7272d2b9e668f3569850120a471f737704f6131a9bdcd4643",
+      "role": "perturbation_diagnostic",
+      "label_provenance": "human_and_model_consensus",
+      "split_group": "scenario",
+      "allowed_training_splits": []
+    },
+    {
+      "id": "decisionbench/data",
+      "revision": "614f9ef2aa06ba6dffbe539bf31a36e36ad4557c",
+      "url": "https://huggingface.co/datasets/decisionbench/data",
+      "card_sha256": "f6828c22cd590c9c68da70144f75f2f95f91e0df4fcc52c43918d26e93a124d4",
+      "role": "routing_trajectory_analysis",
+      "label_provenance": "benchmark_outcomes",
+      "split_group": "task_and_benchmark",
+      "allowed_training_splits": []
+    },
+    {
+      "id": "dylantom2012/open-system-one-bench",
+      "revision": "9590bb2b3b4a155cd97a86fa89dc87c0e1a3fb37",
+      "url": "https://huggingface.co/datasets/dylantom2012/open-system-one-bench",
+      "card_sha256": "aaa4285dc10eddf9f01124523f725d1def4ab2b386016789fd967be21da600a1",
+      "role": "comparison_archive",
+      "label_provenance": "saved_predictions",
+      "split_group": "upstream_item",
+      "allowed_training_splits": []
+    }
+  ]
+}
