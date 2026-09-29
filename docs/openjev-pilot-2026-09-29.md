@@ -89,9 +89,8 @@ do not broaden the training distribution.
 - `runs/*/baseline.json`, `epoch_*/evaluation.json`, `summary.json`,
   `reload_verification.json`: server results, including per-pair predictions.
 
-Training results are not yet filled into this document; consult the experiment
-report for actual completion state rather than treating this setup record as a
-successful training result.
+The four runs finished successfully. Selected checkpoints and the historical
+canary diagnostic are reported in [openjev-pilot-results-2026-09-29.md](openjev-pilot-results-2026-09-29.md).
 
 ## Throughput check
 
