@@ -107,5 +107,31 @@ async def systemone(request: Request):
 
     return {"answers": answers}
 
+
+@app.post("/v1/compare")
+async def compare_candidates(request: Request):
+    """Structured two-candidate comparison, invariant to display order.
+
+    Returns original-orientation scores as diagnostics. General SystemOne calls
+    retain their existing contract; arbitrary free-form states cannot be safely
+    reordered without a structured candidate representation.
+    """
+    from melchior.crucible.decisions import comparison, nli_rows, symmetric_choice
+    body = await request.json()
+    try:
+        rows = []
+        for swapped in (False, True):
+            payload = comparison(body['profile'], body['pair'], swapped=swapped,
+                                 generation_swapped=body.get('generation_swapped', False))
+            rows.extend(nli_rows(payload, 'A'))  # Labels unused during inference.
+        scores = predict_entailment_batch([(r['premise'], r['hypothesis']) for r in rows])
+        p = scores[0] / max(scores[0] + scores[1], 1e-12)
+        q = scores[2] / max(scores[2] + scores[3], 1e-12)
+        result = symmetric_choice(p, q)
+        return {**result, 'normal_p_a': p, 'swapped_p_a': q,
+                'score_semantics': 'mean relative entailment across both orientations'}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)

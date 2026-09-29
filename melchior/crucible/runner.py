@@ -13,7 +13,7 @@ from melchior.crucible.environments import generate_task
 from melchior.crucible.client import CrucibleLLMClient, CandidatePair
 from melchior.crucible.sandbox import AsyncSandbox
 from melchior.crucible.arbiter import CrucibleArbiter
-from melchior.crucible.decisions import comparison
+from melchior.crucible.decisions import comparison, normalize_pair, symmetric_choice, answer_probability_a
 from melchior.crucible.metrics import CONTRACT_VERSION
 from melchior.crucible.storage import RunStore, fingerprint, atomic_json
 
@@ -66,6 +66,7 @@ class CrucibleRunner:
             profile, X_train, y_train, X_test, y_test = generate_task(seed, split=self.split)
             record['profile'] = asdict(profile)
             pair = await self.client.generate_pair(profile, seed)
+            pair = CandidatePair(**normalize_pair(pair))
             # Avoid a fixed association of algorithm family with displayed A/B.
             swapped = bool(hashlib.sha256(f'{self.split}:{seed}:order'.encode()).digest()[0] & 1)
             if swapped:
@@ -85,7 +86,8 @@ class CrucibleRunner:
                     reverse = await self._query_openjev(profile, pair, swapped=True)
                     record['jev'] = {'normal': normal, 'swapped': reverse,
                                      'correct': normal['choice'] == outcome.winner,
-                                     'swap_consistent': normal['choice'] != reverse['choice']}
+                                     'swap_consistent': normal['choice'] != reverse['choice'],
+                                     'symmetric': symmetric_choice(answer_probability_a(normal), answer_probability_a(reverse))}
                 except Exception as exc:
                     record['jev_error'] = f'{type(exc).__name__}: {exc}'
         except Exception as exc:

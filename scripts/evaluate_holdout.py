@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import httpx
 import numpy as np
-from melchior.crucible.decisions import comparison
+from melchior.crucible.decisions import comparison, symmetric_choice, answer_probability_a
 from melchior.crucible.metrics import CONTRACT_VERSION
 from melchior.crucible.runner import parse_answer
 
@@ -35,13 +35,16 @@ def evaluate_benchmark(endpoint='http://localhost:8080/v1/systemone',
             try:
                 answers = []
                 for swapped in (False, True):
-                    response = client.post(endpoint, json=comparison(r['profile'], r['pair'], swapped=swapped))
+                    response = client.post(endpoint, json=comparison(r['profile'], r['pair'], swapped=swapped,
+                                           generation_swapped=r.get('generation_swapped', False)))
                     response.raise_for_status()
                     answers.append(parse_answer(response.json()))
                 a, b = answers
+                symmetric = symmetric_choice(answer_probability_a(a), answer_probability_a(b))
                 row.update(correct=a['choice'] == row['winner'],
                            swapped_correct=b['choice'] != row['winner'],
-                           swap_consistent=a['choice'] != b['choice'], answers=answers)
+                           swap_consistent=a['choice'] != b['choice'], answers=answers,
+                           symmetric=symmetric, symmetric_correct=symmetric['choice'] == row['winner'])
             except Exception as exc:
                 row['error'] = f'{type(exc).__name__}: {exc}'
             rows.append(row)
@@ -66,6 +69,8 @@ def evaluate_benchmark(endpoint='http://localhost:8080/v1/systemone',
                'accuracy_cluster_bootstrap_95': interval, 'independent_dataset_clusters': len(groups),
                'swapped_accuracy': sum(r['swapped_correct'] for r in valid)/n if n else None,
                'swap_consistency': sum(r['swap_consistent'] for r in valid)/n if n else None,
+               'symmetric_accuracy': sum(r['symmetric_correct'] for r in valid)/n if n else None,
+               'symmetric_coverage': sum(r['symmetric']['choice'] != 'UNCERTAIN' for r in valid)/n if n else None,
                'always_a_accuracy': sum(r['winner'] == 'A' for r in valid)/n if n else None,
                'always_b_accuracy': sum(r['winner'] == 'B' for r in valid)/n if n else None,
                'uniform_random_expected_accuracy': .5 if n else None, 'results': rows}

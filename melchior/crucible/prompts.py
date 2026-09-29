@@ -34,6 +34,7 @@ Output raw JSON with candidate_a and candidate_b in this exact structure:
   "candidate_b": {"hypothesis": "rationale for B", "code": "Python module defining fit_predict"}
 }
 Keep each implementation under 35 lines. Use sklearn scoring/CV utilities instead of implementing metrics or folds manually. No markdown fences.
+In rationales and code comments, refer to "this candidate" or "the alternative candidate", never to Candidate A/B: display order is shuffled after generation.
 """
 
 PROMPTS = {
