@@ -92,3 +92,47 @@ do not broaden the training distribution.
 Training results are not yet filled into this document; consult the experiment
 report for actual completion state rather than treating this setup record as a
 successful training result.
+
+## Throughput check
+
+The original microbatch is 2 ML groups (8 sequences), followed by 8 replay
+sequences, accumulated 4 times. The effective batch is 8 groups / 64 sequences;
+the last step of each epoch contains 6 groups / 48 sequences.
+
+`scripts/benchmark_openjev_training.py` compares identical groups and replay
+examples, including a partial final batch. It checks loss and gradient agreement
+with dropout disabled, then measures synchronized forward/backward times with
+training dropout enabled, one warmup and three measured repetitions. Optimizer
+state memory is included; optimizer updates, evaluation and checkpoint saves
+are outside its timing. Exact training trajectories can still change with
+microbatch size because dropout draws and floating point reductions change.
+
+Disabling checkpointing failed even at microbatch 2: PyTorch had allocated
+158.86 GiB when the GPU ran out of free memory. The paused training process and
+serving process also occupied memory during this isolated compute benchmark.
+This does not establish that the model alone exceeds the GPU's 192 GiB, but it
+rules out using that configuration with these colocated processes.
+
+Checkpointing remains enabled. `--micro-groups` and `--accumulation` control
+batching; loss weights account for the actual number of groups in a partial
+accumulation window. The supervisor can resume existing containers, including
+verification containers, without rerunning or overwriting them. New batching
+settings apply only to newly created training containers.
+
+Server artifacts: `speed_benchmark.json`,
+`speed_benchmark_no_checkpoint_failed.json`,
+`speed_benchmark_no_checkpoint_failed.log`,
+`speed_benchmark_gradient_failed.log` under the experiment directory.
+
+Measured baseline: median 12.323 seconds per effective batch, 17.63 GiB peak
+PyTorch allocation in the benchmark process. Microbatch 4 with checkpointing
+failed the conservative gradient gate before timing: loss 0.756323 versus
+0.756137, gradient cosine 0.984548, relative gradient error 0.187525 (dropout
+disabled). This is not evidence of worse downstream quality, but does not
+support treating the settings as a numerically interchangeable optimization.
+Microbatch 8 was not reached. No acceleration has been demonstrated or applied.
+
+The original seed-42 training container and supervisor were resumed unchanged;
+the remaining pilot runs retain microbatch 2, accumulation 4 and checkpointing.
+Further batching changes require investigating the gradient discrepancy and
+checking training quality separately from this four-run comparison.

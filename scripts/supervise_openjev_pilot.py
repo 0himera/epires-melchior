@@ -18,6 +18,11 @@ def wait(name):
     return int(subprocess.check_output(['docker','wait',name],text=True).strip())
 
 
+def exists(name):
+    names=subprocess.check_output(['docker','ps','-a','--format','{{.Names}}'],text=True).splitlines()
+    return name in names
+
+
 def create(template,name,command,repo):
     # Use Docker CLI with explicit devices and volumes from the known pilot.
     original=inspect(template)
@@ -51,19 +56,22 @@ def main(args):
     try:
         # Complete the already-started seed-42 consistency run first.
         jobs=[(args.first,'s42_c01',42,.1)]
-        if wait(args.first)!=0:
-            raise RuntimeError('Initial training container failed; inspect its logs')
+        if not exists(args.first):
+            raise RuntimeError('Initial training container is missing')
         for seed,weight in [(42,0.),(43,.1),(43,0.)]:
             jobs.append((f'openjev-lora-pilot-s{seed}-c{int(weight*10)}',f's{seed}_c{int(weight*10):02d}',seed,weight))
-        for i,(name,run,seed,weight) in enumerate(jobs):
-            if i:
+        for name,run,seed,weight in jobs:
+            if not exists(name):
                 create(args.first,name,['/repo/scripts/train_openjev_adapter.py','--model','/model/qwen3.5-4b-nli-v5',
                     '--data','/experiment/data','--output',f'/experiment/runs/{run}','--seed',str(seed),
-                    '--consistency',str(weight),'--epochs','3'],str(args.repository))
-                if wait(name)!=0:raise RuntimeError(f'Training failed: {name}')
+                    '--consistency',str(weight),'--epochs','3','--micro-groups',str(args.micro_groups),
+                    '--accumulation',str(args.accumulation),
+                    '--gradient-checkpointing' if args.gradient_checkpointing else '--no-gradient-checkpointing'],str(args.repository))
+            if wait(name)!=0:raise RuntimeError(f'Training failed: {name}')
             verify=name+'-verify'
-            create(args.first,verify,['/repo/scripts/verify_openjev_adapter.py','--model','/model/qwen3.5-4b-nli-v5',
-                '--data','/experiment/data','--run',f'/experiment/runs/{run}'],str(args.repository))
+            if not exists(verify):
+                create(args.first,verify,['/repo/scripts/verify_openjev_adapter.py','--model','/model/qwen3.5-4b-nli-v5',
+                    '--data','/experiment/data','--run',f'/experiment/runs/{run}'],str(args.repository))
             if wait(verify)!=0:raise RuntimeError(f'Adapter reload failed: {verify}')
             report(args.root,'running',errors)
         report(args.root,'complete',errors)
@@ -81,4 +89,7 @@ if __name__=='__main__':
     p.add_argument('--first',required=True)
     p.add_argument('--repository',type=Path,required=True)
     p.add_argument('--root',type=Path,required=True)
+    p.add_argument('--micro-groups',type=int,default=2)
+    p.add_argument('--accumulation',type=int,default=4)
+    p.add_argument('--gradient-checkpointing',action=argparse.BooleanOptionalAction,default=True)
     main(p.parse_args())

@@ -94,23 +94,9 @@ def evaluate(model,tok,ml,encoded_ml,replay,batch_groups=2):
             'results':results}
 
 
-def main(args):
-    args.output.mkdir(parents=True,exist_ok=False)
-    set_seed(args.seed)
-    tok=AutoTokenizer.from_pretrained(args.model,local_files_only=True)
-    tok.padding_side='right'
-    if tok.pad_token_id is None:tok.pad_token=tok.eos_token
-    ml={k:read_rows(args.data/f'ml_{k}.jsonl') for k in ('train','dev')}
-    assert not ({x['group'] for x in ml['train']} & {x['group'] for x in ml['dev']})
-    encoded={k:[encode_rows(tok,g['views'],args.max_length)[0] for g in v] for k,v in ml.items()}
-    replay={};discarded={}
-    raw_replay={k:read_rows(args.data/f'replay_{k}.jsonl') for k in ('train','dev')}
-    assert not ({x['group'] for x in raw_replay['train']} & {x['group'] for x in raw_replay['dev']})
-    for k in ('train','dev'):
-        replay[k],discarded[k]=encode_rows(tok,raw_replay[k],args.max_length,strict=False)
-        assert set(r['labels'] for r in replay[k])=={0,1,2}
+def load_model(model_path,tok,gradient_checkpointing=True):
     print('Loading base model',flush=True)
-    model=AutoModelForSequenceClassification.from_pretrained(args.model,local_files_only=True,dtype=torch.bfloat16,attn_implementation='sdpa').to('cuda')
+    model=AutoModelForSequenceClassification.from_pretrained(model_path,local_files_only=True,dtype=torch.bfloat16,attn_implementation='sdpa').to('cuda')
     model.config.pad_token_id=tok.pad_token_id
     model.config.get_text_config().pad_token_id=tok.pad_token_id
     model.config.use_cache=False
@@ -125,7 +111,29 @@ def main(args):
     model=get_peft_model(model,config)
     for name,param in model.named_parameters():
         if any(s in name.lower() for s in ('visual','vision')):param.requires_grad=False
-    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant':False})
+    if gradient_checkpointing:
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant':False})
+    return model,modules
+
+
+def main(args):
+    if args.micro_groups < 1 or args.accumulation < 1:
+        raise ValueError('Micro groups and accumulation must be positive')
+    args.output.mkdir(parents=True,exist_ok=False)
+    set_seed(args.seed)
+    tok=AutoTokenizer.from_pretrained(args.model,local_files_only=True)
+    tok.padding_side='right'
+    if tok.pad_token_id is None:tok.pad_token=tok.eos_token
+    ml={k:read_rows(args.data/f'ml_{k}.jsonl') for k in ('train','dev')}
+    assert not ({x['group'] for x in ml['train']} & {x['group'] for x in ml['dev']})
+    encoded={k:[encode_rows(tok,g['views'],args.max_length)[0] for g in v] for k,v in ml.items()}
+    replay={};discarded={}
+    raw_replay={k:read_rows(args.data/f'replay_{k}.jsonl') for k in ('train','dev')}
+    assert not ({x['group'] for x in raw_replay['train']} & {x['group'] for x in raw_replay['dev']})
+    for k in ('train','dev'):
+        replay[k],discarded[k]=encode_rows(tok,raw_replay[k],args.max_length,strict=False)
+        assert set(r['labels'] for r in replay[k])=={0,1,2}
+    model,modules=load_model(args.model,tok,args.gradient_checkpointing)
     trainable=[(n,p) for n,p in model.named_parameters() if p.requires_grad]
     assert any('score' in n for n,p in trainable)
     assert not any('visual' in n or 'vision' in n for n,p in trainable)
@@ -150,20 +158,25 @@ def main(args):
         replay_order=list(range(len(replay['train'])));random.Random(args.seed+1000+epoch).shuffle(replay_order)
         rp=0;optimizer.zero_grad(set_to_none=True);losses=[]
         for bi,start in enumerate(range(0,len(order),micro)):
+            if bi%accum==0:
+                step_started=time.monotonic()
+                torch.cuda.reset_peak_memory_stats()
             indices=order[start:start+micro]
             rows=[x for i in indices for x in encoded['train'][i]]
             inputs,labels=batch(tok,rows)
             logits=model(**inputs).logits.float()
             p,q=probabilities(logits)
             consistency=((p+q-1)**2).mean()
-            divisor=min(accum,batches-(bi//accum)*accum)
+            window_start=(bi//accum)*accum*micro
+            window_groups=min(micro*accum,len(order)-window_start)
+            weight=len(indices)/window_groups
             ml_loss=F.cross_entropy(logits,labels)
-            ((.5*ml_loss+args.consistency*consistency)/divisor).backward()
+            ((.5*ml_loss+args.consistency*consistency)*weight).backward()
             replay_rows=[replay['train'][replay_order[(rp+i)%len(replay_order)]] for i in range(len(rows))]
             rp+=len(rows)
             inputs,labels=batch(tok,replay_rows)
             replay_loss=F.cross_entropy(model(**inputs).logits.float(),labels)
-            (.5*replay_loss/divisor).backward()
+            (.5*replay_loss*weight).backward()
             losses.append([ml_loss.item(),replay_loss.item(),consistency.item()])
             if (bi+1)%accum==0 or bi+1==batches:
                 step+=1
@@ -172,7 +185,11 @@ def main(args):
                 norm=torch.nn.utils.clip_grad_norm_([p for n,p in trainable],1.)
                 if not torch.isfinite(norm):raise RuntimeError('Nonfinite gradient norm')
                 optimizer.step();optimizer.zero_grad(set_to_none=True)
-                print(json.dumps({'epoch':epoch,'step':step,'total_steps':total_steps,'losses':losses[-1],'elapsed_s':round(time.monotonic()-started,1)}),flush=True)
+                print(json.dumps({'epoch':epoch,'step':step,'total_steps':total_steps,'losses':losses[-1],
+                                  'elapsed_s':round(time.monotonic()-started,1),
+                                  'step_s':round(time.monotonic()-step_started,3),
+                                  'gradient_norm':norm.item(),
+                                  'peak_allocated_gib':round(torch.cuda.max_memory_allocated()/2**30,2)}),flush=True)
         directory=args.output/f'epoch_{epoch}'
         model.save_pretrained(directory);tok.save_pretrained(directory)
         metrics=evaluate(model,tok,ml['dev'],encoded['dev'],replay['dev'])
@@ -201,5 +218,6 @@ if __name__=='__main__':
     parser.add_argument('--lr',type=float,default=2e-5)
     parser.add_argument('--micro-groups',type=int,default=2)
     parser.add_argument('--accumulation',type=int,default=4)
+    parser.add_argument('--gradient-checkpointing',action=argparse.BooleanOptionalAction,default=True)
     parser.add_argument('--max-length',type=int,default=2048)
     main(parser.parse_args())
