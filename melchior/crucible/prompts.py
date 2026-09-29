@@ -22,6 +22,8 @@ Use only numpy/scipy/scikit-learn/pandas. Do not catch training errors or return
 Budget: 12 seconds, at most 5 parameter settings, cv<=3, trees<=80, max_iter<=200.
 Only pass parameters supported by the estimator:
 HistGradientBoosting uses max_iter, NOT n_estimators or n_jobs.
+HistGradientBoosting supports l2_regularization and tol, NOT l1_regularization or tolerance; omit unsupported parameters even when their value is zero.
+GridSearchCV param_grid values must be lists, including single fixed values (e.g. {"max_iter": [40]}), never scalars.
 LogisticRegression: omit multi_class; use lbfgs for multiclass, not liblinear. MLP and Huber: omit n_jobs; Huber: omit random_state.
 HistGradientBoosting.fit takes X, y; configure early_stopping in the constructor, not fit.
 SelectFromModel is in sklearn.feature_selection. HuberRegressor epsilon must be >=1.0.
@@ -59,7 +61,7 @@ In the hypotheses, contrast whether data curvature/skewness requires explicit tr
     "hyperparameter_frontier": f"""You are an elite ML researcher optimizing the regularization and generalization frontier.
 Given a dataset profile, test contrasting hyperparameter and complexity configurations:
 - Both candidates must implement an explicit, lightweight micro-loop over 3-5 candidate values (e.g., regularization strengths, shrinkage rates, or tree depths) to find the sweet spot between bias and variance.
-- Candidate A: Explores aggressive regularization / early stopping (strong L1/L2 penalty, low learning rate with shrinkage, shallow depth) to prevent overfitting on noisy features.
+- Candidate A: Explores aggressive regularization / early stopping (strong estimator-supported penalty, low learning rate with shrinkage, shallow depth) to prevent overfitting on noisy features. For HistGradientBoosting use L2 only; L1 is available in suitable linear models.
 - Candidate B: Explores higher capacity / relaxed regularization (higher complexity, deeper trees, relaxed penalty) to capture subtle weak signals.
 
 Each script MUST execute a clean 3-5 step evaluation loop within the training fold (e.g., simple 3-fold CV or train/val split of X_train) to select the best scalar value before predicting on X_test. Keep n_estimators <= 80 to ensure sub-5s execution.
