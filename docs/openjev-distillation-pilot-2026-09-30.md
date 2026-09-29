@@ -64,3 +64,41 @@ Raw data and weights remain outside Git.
 
 Results are recorded in the private run's `student/summary.json`; do not infer
 success merely from a container starting. No student is promoted to serving.
+
+## Completed result
+
+Finished at **02:20:01 MSK**. All 26 optimizer updates completed; all 824 ML
+training rows and all 2,000 replay training rows were used. Student training and
+final checks took 280.6 seconds, excluding its initial evaluation and teacher
+export. The final adapter passed fresh-model reload verification with zero
+score difference on the four checked dev pairs. Qwen was restarted.
+
+| Existing dev measure | Unchanged 0.8B | Distilled 0.8B | Trained 4B teacher |
+|---|---:|---:|---:|
+| Normal-order ML accuracy, 52 pairs | 53.85% | 80.77% | 96.15% |
+| Reversed-order ML accuracy | 40.38% | 84.62% | 98.08% |
+| Symmetric ML accuracy | 40.38% | 84.62% | 98.08% |
+| Raw swap consistency | 51.92% | 92.31% | 98.08% |
+| Replay NLI accuracy, 501 rows | 83.03% | 85.63% | 96.41% |
+
+Student/teacher NLI class agreement on the 208 ML dev rows improved from
+49.04% to 84.13%; temperature-scaled mean KL fell from 2.842 to 0.482.
+Replay class agreement improved from 82.04% to 84.83%, KL from 1.515 to 0.828.
+The student remains below the teacher. Replay neutral-class accuracy declined
+from 93.6% to 87.2%, despite higher overall replay accuracy. This is a tradeoff
+to investigate before deployment. These are the existing development splits,
+which were already used to select the teacher; the new student has not yet had
+an independent evaluation.
+
+There are 10,825,728 trainable student parameters. The final adapter is
+43,352,680 bytes, SHA256
+`162082f362fd719c5a8249f0a15de9815806d2c1bdea11454dc76d2b556c56e4`.
+It needs the pinned public 0.8B base to run.
+
+The automatic mirror interrupted on a 240-second transfer timeout. Recovery
+prioritized the final adapter and reports, with SSH keepalive and an inactivity
+timeout; these four artifacts were downloaded and independently checked against
+source SHA256 at **02:26:55 MSK**. Remaining intermediate checkpoints were then
+copied separately. The public base downloads also encountered a Hugging Face
+Xet reconstruction error; public base files must not be assumed complete until
+their full source checksums match.
