@@ -85,3 +85,10 @@ Qwen canary exits. Generation concurrency stays at 32 workers. The portfolio
 runs with four CPU workers and scores the selected adapter through serving.
 Each run preserves its own corpus; outputs are under `extras/portfolio/` and
 `extras/qwen/`. Checkpoint and preprocessing are fixed before either run.
+
+A detached supervisor waits for both Qwen runs and the portfolio, then scores
+the original base model on their saved decisive pairs in a separate process.
+The comparison uses the validated 2,048-token budget; longer inputs are recorded
+as exclusions, while their original trained-serving scores remain archived.
+Paired base/adapted counts are saved by cohort in `base_comparison.json`.
+The trained serving container stays available throughout this comparison.

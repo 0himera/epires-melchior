@@ -47,8 +47,12 @@ def main(args):
         max_tokens=max(len(e['input_ids']) for e in encoded)
         items.append((row,cohort,digest,encoded,max_tokens))
     overlength=[(r['seed'],cohort,length) for r,cohort,_,_,length in items if length>args.max_length]
-    if overlength:
+    if overlength and not args.skip_overlength:
         raise ValueError(f'Pair exceeds model input budget: {overlength}')
+    if args.skip_overlength:
+        items=[item for item in items if item[-1]<=args.max_length]
+    if not items:
+        raise ValueError('No decisive pairs within the model input budget')
 
     base=AutoModelForSequenceClassification.from_pretrained(
         args.model,local_files_only=True,dtype=torch.bfloat16,attn_implementation='sdpa').to('cuda')
@@ -97,6 +101,8 @@ def main(args):
                             'model':str(args.model),'adapter':str(args.adapter) if args.adapter else None,
                             'data_sha256':{str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in args.datasets},
                             'max_length':args.max_length,'max_observed_tokens':max(x[-1] for x in items),
+                            'excluded_overlength':[{'seed':seed,'cohort':cohort,'tokens':length}
+                                                   for seed,cohort,length in overlength],
                             'peak_allocated_gib':torch.cuda.max_memory_allocated()/2**30,
                             'aggregate':aggregate,'results':results})
     print(json.dumps({'aggregate':aggregate,'peak_allocated_gib':torch.cuda.max_memory_allocated()/2**30}),flush=True)
@@ -108,6 +114,7 @@ if __name__=='__main__':
     parser.add_argument('--adapter',type=Path)
     parser.add_argument('--datasets',type=Path,nargs='+',required=True)
     parser.add_argument('--max-length',type=int,default=2048)
+    parser.add_argument('--skip-overlength',action='store_true',help='Record exclusions and score only complete inputs within the limit')
     parser.add_argument('--scope',default='historical development data; no checkpoint selection or promotion')
     parser.add_argument('--output',type=Path,required=True)
     main(parser.parse_args())
