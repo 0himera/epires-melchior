@@ -23,6 +23,7 @@ from melchior.crucible.arbiter import CrucibleArbiter
 from melchior.crucible.client import CandidatePair
 from melchior.crucible.environments import TaskProfile, generate_task
 from melchior.crucible.sandbox import AsyncSandbox
+from melchior.crucible.task_pack import TaskPack
 
 
 SYNTHETIC_SEEDS = tuple(range(80000, 80096))  # 64 seeds in variants 0..3
@@ -177,27 +178,34 @@ async def run_task(index, task, output: Path, semaphore, sandbox, arbiter):
 
 
 async def main(args):
+    pack = TaskPack(args.task_pack, split='eval') if args.task_pack else None
     output = args.output
     output.mkdir(parents=True, exist_ok=False)
     (output / "arrays").mkdir()
     source_hash = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     protocol = {"schema": "independent-test-protocol-v1", "source_sha256": source_hash,
-                "synthetic_seeds": list(SYNTHETIC_SEEDS), "real_datasets": REAL_DATASETS,
-                "real_split_seeds": REAL_SPLITS, "pair_graphs": PAIR_GRAPHS,
+                "synthetic_seeds": [] if pack else list(SYNTHETIC_SEEDS),
+                "real_datasets": [] if pack else REAL_DATASETS,
+                "real_split_seeds": [] if pack else REAL_SPLITS, "pair_graphs": PAIR_GRAPHS,
                 "algorithms": list(ALGO_DESCRIPTIONS), "min_delta": .005,
                 "paired_bootstrap_resamples": 200,
                 "candidate_source": "fixed sklearn portfolio; not Qwen-generated",
                 "selection": "All decisive pairs, no model-dependent filtering",
                 "independence": "No model scores consulted before corpus freeze"}
+    if pack:
+        protocol['task_pack_sha256'] = pack.sha256
     (output / "protocol.json").write_text(json.dumps(protocol, indent=2) + "\n")
     tasks = []
-    for seed in SYNTHETIC_SEEDS:
-        if seed % 6 < 4:
-            p, a, b, c, d = generate_task(seed, split="eval")
-            tasks.append((p, a, b, c, d, {"source": "crucible_synthetic", "seed": seed}))
-    for spec in REAL_DATASETS:
-        for split_seed in REAL_SPLITS:
-            tasks.append(real_task(spec, split_seed))
+    if pack:
+        tasks = [(*pack.load(seed), pack.metadata(seed)['preprocessing']) for seed in pack.seeds]
+    else:
+        for seed in SYNTHETIC_SEEDS:
+            if seed % 6 < 4:
+                p, a, b, c, d = generate_task(seed, split="eval")
+                tasks.append((p, a, b, c, d, {"source": "crucible_synthetic", "seed": seed}))
+        for spec in REAL_DATASETS:
+            for split_seed in REAL_SPLITS:
+                tasks.append(real_task(spec, split_seed))
     print(f"Frozen protocol; executing {len(tasks)} tasks, {len(tasks)*3} pairs", flush=True)
     semaphore = asyncio.Semaphore(args.workers)
     sandbox = AsyncSandbox(timeout_s=90)
@@ -232,4 +240,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument('--task-pack', type=Path, help='Use an existing frozen eval pack instead of built-in datasets')
     asyncio.run(main(parser.parse_args()))

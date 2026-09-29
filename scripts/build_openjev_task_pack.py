@@ -3,6 +3,7 @@ import argparse
 from collections import Counter
 from dataclasses import asdict
 import hashlib
+import json
 from pathlib import Path
 
 import numpy as np
@@ -21,20 +22,21 @@ REAL_DATASETS = (
 REAL_SPLITS = (2718, 2719, 2720, 2721)
 
 
-def build(output):
+def build(output, *, synthetic_seeds=SYNTHETIC_SEEDS, real_datasets=REAL_DATASETS,
+          real_splits=REAL_SPLITS, real_seed_start=90100):
     output.mkdir(parents=True, exist_ok=False)
     (output / 'arrays').mkdir()
     protocol = {
         'schema': 'qwen-trained-canary-protocol-v1', 'split': 'eval',
-        'synthetic_seeds': SYNTHETIC_SEEDS, 'real_datasets': REAL_DATASETS,
-        'real_split_seeds': REAL_SPLITS, 'candidate_source': 'fresh Qwen generation',
+        'synthetic_seeds': synthetic_seeds, 'real_datasets': real_datasets,
+        'real_split_seeds': real_splits, 'candidate_source': 'fresh Qwen generation',
         'selection': 'All attempted tasks; decisive pairs use paired bootstrap, min_delta=0.005',
         'reasoning_effort': 'xhigh', 'enable_thinking': True, 'generation_max_tokens': 16384,
         'concurrency': 32, 'max_hours': 3, 'sandbox_timeout_s': 60,
         'generation_timeout_s': 1200, 'model_selection': 's42_c00 epoch_2 fixed before generation',
         'primary_score': 'symmetric choice, mean relative entailment in both A/B orientations',
         'comparison': 'After collection, rescore the same pairs with the original base model',
-        'independence': 'New synthetic realizations and three previously unused OpenML datasets',
+        'independence': 'New synthetic realizations and previously unused OpenML datasets',
         'grouping': 'OpenML splits share a dataset group; synthetic realizations are separate groups',
         'preprocessing': 'Explicit ID removal only; numeric medians and one-hot encoding fit on train',
         'source_sha256': {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (
@@ -52,11 +54,11 @@ def build(output):
         tasks.append({'seed': seed, 'profile': asdict(profile), 'preprocessing': metadata,
                       'arrays': name, 'arrays_sha256': hashlib.sha256((output / name).read_bytes()).hexdigest()})
 
-    for seed in SYNTHETIC_SEEDS:
+    for seed in synthetic_seeds:
         save(seed, (*generate_task(seed, split='eval'), {'source': 'crucible_synthetic', 'seed': seed}))
-    seed = 90100
-    for spec in REAL_DATASETS:
-        for split_seed in REAL_SPLITS:
+    seed = real_seed_start
+    for spec in real_datasets:
+        for split_seed in real_splits:
             save(seed, real_task(spec, split_seed))
             seed += 1
     manifest = {'schema': 'frozen-task-pack-v1', 'protocol_sha256': hashlib.sha256(
@@ -69,4 +71,11 @@ def build(output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', required=True, type=Path)
-    build(parser.parse_args().output)
+    parser.add_argument('--real-only', action='store_true')
+    parser.add_argument('--dataset-specs', type=Path, help='JSON list of OpenML [id, name, task_type, metric, target_column]')
+    parser.add_argument('--real-splits', type=int, nargs='+', default=REAL_SPLITS)
+    parser.add_argument('--real-seed-start', type=int, default=90100)
+    args = parser.parse_args()
+    build(args.output, synthetic_seeds=() if args.real_only else SYNTHETIC_SEEDS,
+          real_datasets=json.loads(args.dataset_specs.read_text()) if args.dataset_specs else REAL_DATASETS,
+          real_splits=args.real_splits, real_seed_start=args.real_seed_start)

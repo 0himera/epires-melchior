@@ -57,3 +57,31 @@ independent-test archive stays frozen as generated at commit `aa8c99b`.
 This canary tests fresh candidate comparisons. It does not establish a gain in
 the complete agent's iterative search under a fixed compute budget; that is the
 next experiment after checking this collection and the base-model comparison.
+
+## Additional real datasets
+
+After the initial pack was frozen, six more datasets were downloaded and checked
+against the official OpenML metadata and targets:
+
+| Dataset | OpenML ID | Original rows / features | Metric |
+|---|---:|---:|---|
+| cpu_small | 562 | 8,192 / 12 | R² |
+| house_prices | 42165 | 1,460 / 80 | R² |
+| abalone | 183 | 4,177 / 8 | R² |
+| kc1 | 1067 | 2,109 / 21 | F1 |
+| phoneme | 1489 | 5,404 / 5 | ROC AUC |
+| cmc | 23 | 1,473 / 9 | Accuracy |
+
+The extra pack has four frozen splits per dataset (24 tasks), split seeds
+4061–4064, task seeds 92000–92023, and SHA-256
+`9dc9945e9e313437fdf80aaad1fb156b86e4006226dbf4c89e0b14538f4b4e53`.
+OpenML sources and downloaded file checksums are in `dataset_search.json`.
+Larger datasets are deterministically subsampled to 2,500 rows before the split.
+Abalone's target is the numeric ring count, not a 28-class classification.
+
+Two additional runs use these inputs: a fixed six-algorithm portfolio with
+144 executions / 72 pairs, and a queued 24-task Qwen canary after the first
+Qwen canary exits. Generation concurrency stays at 32 workers. The portfolio
+runs with four CPU workers and scores the selected adapter through serving.
+Each run preserves its own corpus; outputs are under `extras/portfolio/` and
+`extras/qwen/`. Checkpoint and preprocessing are fixed before either run.
